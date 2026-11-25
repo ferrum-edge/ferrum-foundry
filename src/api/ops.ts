@@ -294,7 +294,7 @@ export interface ClusterStatusDp {
     config_diverged: boolean;
     config_diverged_since?: string | null;
     config_divergence_recoveries_total: number;
-  };
+  } | null;
 }
 
 export interface ClusterStatusOther {

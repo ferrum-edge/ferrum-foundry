@@ -1158,8 +1158,9 @@ const tlsInventory = [
 ];
 
 const tlsEvents = [
-  { id: 3, at: ago(20), surface: 'proxy_https', outcome: 'rotated', sources: [{ label: 'cert', cert_id: 'inv-edge-cert', source_id: 'managed://certificates/edge-cert', scheme: 'managed', kind: 'cert', fingerprint_sha256: 'ab12cd34' }], revision: 4 },
-  { id: 2, at: ago(1500), surface: 'backend_tls', outcome: 'load_error', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: '/etc/ferrum/old-ca.pem', scheme: 'file', kind: 'ca_bundle' }], error: 'PEM parse error at byte 120' },
+  { id: 4, at: ago(10), surface: 'backend_tls', outcome: 'recovered', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: 'source-6d9a2e41b0c3f8a1e4b7c092', scheme: 'file', kind: 'ca_bundle' }] },
+  { id: 3, at: ago(20), surface: 'proxy_https', outcome: 'rotated', sources: [{ label: 'cert', cert_id: 'inv-edge-cert', source_id: 'source-91a4c8e2d7f03b5a12e84f60', scheme: 'managed', kind: 'cert', fingerprint_sha256: 'ab12cd34' }], revision: 4 },
+  { id: 2, at: ago(1500), surface: 'backend_tls', outcome: 'load_error', sources: [{ label: 'ca', cert_id: 'inv-old-ca', source_id: 'source-6d9a2e41b0c3f8a1e4b7c092', scheme: 'file', kind: 'ca_bundle' }], error: 'PEM parse error at byte 120' },
 ];
 
 const serviceGraphEdges = [
@@ -1501,7 +1502,11 @@ export const server = createServer(async (req, res) => {
 
   /* TLS management */
   if (path === '/admin/tls/inventory') return send(200, paginate(tlsInventory, url));
-  if (path === '/admin/tls/events') return send(200, paginate(tlsEvents, url));
+  if (path === '/admin/tls/events') {
+    const outcome = url.searchParams.get('outcome');
+    const filtered = outcome ? tlsEvents.filter((event) => event.outcome === outcome) : tlsEvents;
+    return send(200, paginate(filtered, url));
+  }
   if (path === '/admin/tls/validate') return send(200, { valid: true, validated: { cert: { subject: 'CN=test', days_until_expiry: 90 } } });
   const rotateMatch = path.match(TLS_ROTATE_PATH_PATTERN);
   if (rotateMatch) return send(202, { accepted: true, requested_surface: rotateMatch[1], surface: rotateMatch[1] });

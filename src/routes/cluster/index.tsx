@@ -328,26 +328,42 @@ function ClusterWorkspace() {
         <Card>
           <div className="flex items-center gap-4 mb-3">
             <Badge variant="purple" className="px-3 py-1">DATA PLANE</Badge>
-            <Badge variant={clusterError ? "default" : cluster.control_plane.status === "online" ? "green" : "red"}>
-              {clusterError ? "Last known CP" : "CP"} {cluster.control_plane.status}
-            </Badge>
-            {cluster.control_plane.config_diverged && (
-              <Badge variant={clusterError ? "default" : "red"}>{clusterError ? "last known config diverged" : "config diverged"}</Badge>
+            {cluster.control_plane ? (
+              <>
+                <Badge variant={clusterError ? "default" : cluster.control_plane.status === "online" ? "green" : "red"}>
+                  {clusterError ? "Last known CP" : "CP"} {cluster.control_plane.status}
+                </Badge>
+                {cluster.control_plane.config_diverged && (
+                  <Badge variant={clusterError ? "default" : "red"}>{clusterError ? "last known config diverged" : "config diverged"}</Badge>
+                )}
+              </>
+            ) : (
+              <Badge variant="default">
+                {clusterError ? "Last known CP status unknown" : "CP status unknown"}
+              </Badge>
             )}
           </div>
-          <div className="space-y-1 text-sm text-text-secondary">
-            <p>
-              Control plane:{" "}
-              <span className="font-mono text-text-primary">{cluster.control_plane.url}</span>
-              {cluster.control_plane.is_primary ? " (primary)" : ""}
+          {cluster.control_plane ? (
+            <div className="space-y-1 text-sm text-text-secondary">
+              <p>
+                Control plane:{" "}
+                <span className="font-mono text-text-primary">{cluster.control_plane.url}</span>
+                {cluster.control_plane.is_primary ? " (primary)" : ""}
+              </p>
+              <p>Connected since: {formatDateTime(cluster.control_plane.connected_since)}</p>
+              <p>Last config received: {formatDateTime(cluster.control_plane.last_config_received_at)}</p>
+              <p>
+                Divergence recoveries:{" "}
+                {cluster.control_plane.config_divergence_recoveries_total}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-text-muted">
+              {clusterError
+                ? "No control plane connection state in last known snapshot."
+                : "No control plane connection state reported yet."}
             </p>
-            <p>Connected since: {formatDateTime(cluster.control_plane.connected_since)}</p>
-            <p>Last config received: {formatDateTime(cluster.control_plane.last_config_received_at)}</p>
-            <p>
-              Divergence recoveries:{" "}
-              {cluster.control_plane.config_divergence_recoveries_total}
-            </p>
-          </div>
+          )}
         </Card>
       )}
       {cluster && !isCpStatus(cluster) && !isDpStatus(cluster) && (

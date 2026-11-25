@@ -61,6 +61,7 @@ import type {
   ManagedTlsCollection,
   ManagedTlsRecord,
   TlsRotateSurface,
+  TlsSourceEventOutcome,
   TlsValidateRequest,
   AcmeOrder,
   AcmeCertificateRecord,
@@ -630,12 +631,25 @@ function InventoryTab() {
 /*  Events tab                                                         */
 /* ------------------------------------------------------------------ */
 
+const TLS_EVENT_OUTCOMES: ReadonlySet<TlsSourceEventOutcome> = new Set([
+  "rotated",
+  "recovered",
+  "load_error",
+  "rebuild_error",
+]);
+
 function EventsTab() {
-  const [outcome, setOutcome] = useState<string>("");
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const navigate = useNavigate();
+  const outcome: TlsSourceEventOutcome | undefined =
+    typeof search.outcome === "string" &&
+    TLS_EVENT_OUTCOMES.has(search.outcome as TlsSourceEventOutcome)
+      ? (search.outcome as TlsSourceEventOutcome)
+      : undefined;
   const pagination = usePaginationParams({ defaultLimit: 50 });
   const page = useTlsEvents({
     ...pagination.paginationParams,
-    ...(outcome && { outcome: outcome as "rotated" | "load_error" | "rebuild_error" }),
+    ...(outcome && { outcome }),
   });
   const { data, isLoading } = page;
   const events = data?.data ?? [];
@@ -645,14 +659,26 @@ function EventsTab() {
       <div className="w-56">
         <Select
           label="Outcome"
-          value={outcome || "all"}
+          value={outcome ?? "all"}
           onValueChange={(v) => {
-            setOutcome(v === "all" ? "" : v);
-            pagination.setParams({ offset: 0, limit: pagination.limit });
+            const nextOutcome =
+              v !== "all" && TLS_EVENT_OUTCOMES.has(v as TlsSourceEventOutcome)
+                ? (v as TlsSourceEventOutcome)
+                : undefined;
+            void navigate({
+              search: ({ outcome: _prevOutcome, ...previous }: Record<string, unknown>) => ({
+                ...previous,
+                ...(nextOutcome ? { outcome: nextOutcome } : {}),
+                offset: 0,
+                limit: pagination.limit,
+              }),
+              replace: true,
+            } as never);
           }}
           options={[
             { value: "all", label: "All outcomes" },
             { value: "rotated", label: "Rotated" },
+            { value: "recovered", label: "Recovered" },
             { value: "load_error", label: "Load error" },
             { value: "rebuild_error", label: "Rebuild error" },
           ]}
@@ -679,7 +705,7 @@ function EventsTab() {
           events.map((event) => (
             <div key={event.id} className="px-4 py-3 border-b border-border/50 last:border-b-0">
               <div className="flex items-center gap-3 flex-wrap">
-                <Badge variant={event.outcome === "rotated" ? "green" : "red"}>
+                <Badge variant={event.outcome === "rotated" || event.outcome === "recovered" ? "green" : "red"}>
                   {event.outcome}
                 </Badge>
                 <span className="text-sm text-text-primary font-medium">{event.surface}</span>
@@ -1818,7 +1844,12 @@ function TlsWorkspace() {
     typeof search.tab === "string" && TLS_TABS.includes(search.tab) ? search.tab : "inventory";
   const selectTab = (next: string) => {
     void navigate({
-      search: ({ offset: _offset, limit: _limit, ...previous }: Record<string, unknown>) => ({
+      search: ({
+        offset: _offset,
+        limit: _limit,
+        outcome: _outcome,
+        ...previous
+      }: Record<string, unknown>) => ({
         ...previous,
         tab: next,
       }),
