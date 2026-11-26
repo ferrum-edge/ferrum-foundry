@@ -23,7 +23,7 @@ RUN npm run build \
 # Distroless: no shell, no package manager, and Node as the only executable
 # entrypoint at /nodejs/bin/node. The image's own user is nonroot (65532), set
 # numerically below so Kubernetes `runAsNonRoot` can verify it.
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:39b0407357c9fadf1a9708d22088f02de21f0e1e8a688474eea2d8701e7d5693
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:675c532423b908f9e56f9d60a4e62309b63cd2a3175acb90a46b96f7ee68e121
 
 WORKDIR /app
 
