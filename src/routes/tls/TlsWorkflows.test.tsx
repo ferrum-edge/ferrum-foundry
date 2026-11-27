@@ -17,6 +17,7 @@ const WHITESPACE_RUNS_PATTERN = /\s+/g;
 const UUID_PATTERN = /^[0-9a-f-]{36}$/;
 const RENEW_PATTERN = /^renew-[0-9a-f]{32}$/;
 const PLURAL_SUFFIX_PATTERN = /s$/;
+const MANAGED_ITEM_PATTERN = /^(certificates|ca-bundles|crls|ocsp-responses|jwks)\/([^/]+)$/;
 
 const at = "2026-09-01T00:00:00Z";
 // Deliberately invalid cryptographic material: these fixtures only exercise
@@ -85,6 +86,11 @@ beforeEach(() => {
     const path = new URL(request.url).pathname.replace("/api/proxy/admin/tls/", "");
     if (path === "acme/certificates/acme-edge") return Response.json(certificate);
     if (path === "acme/orders/order-edge") return Response.json({ ...order, status: "valid" });
+    const item = MANAGED_ITEM_PATTERN.exec(path);
+    if (item) {
+      const found = (collections[item[1]] as ManagedTlsRecord[]).find((entry) => entry.id === item[2]);
+      return found ? Response.json(found) : Response.json({ error: "not found" }, { status: 404 });
+    }
     if (!(path in collections)) throw new Error(`Unexpected TLS read: ${path}`);
     if (path === "events") {
       const url = new URL(request.url);
@@ -623,23 +629,44 @@ describe("managed TLS material", () => {
     expect(writes()).toHaveLength(2);
   });
 
+  function managedRecord(collection: string, kind: ManagedTlsRecord["kind"]): ManagedTlsRecord {
+    const certificateMaterial = collection === "certificates" || collection === "ca-bundles";
+    return {
+      id: "edge-cert", name: "Edge Certificate", kind, description: "Primary listener material",
+      source_uri: `managed://${collection}/edge-cert`, created_at: at, updated_at: at,
+      // Only certificate material has a subject and an expiry.
+      ...(certificateMaterial && { subject: "CN=api.example.test", not_after: "2026-11-01T00:00:00Z" }),
+    };
+  }
+
+  function listReads(collection: string) {
+    return requests.filter((request) => request.method === "GET"
+      && new URL(request.url).pathname === `/api/proxy/admin/tls/${collection}`).length;
+  }
+
+  function cachedSubmissions(secret: string) {
+    return ui.client.getMutationCache().getAll()
+      .filter((mutation) => JSON.stringify(mutation.state.variables ?? null).includes(secret));
+  }
+
+  async function openRotation(recordLabel: string) {
+    await act(async () => getByRole(panel(), "button", { name: `Rotate ${recordLabel} Edge Certificate` }).click());
+  }
+
   it.each([
     ["Certificates", "certificates", "certificate", "cert_pem", "Certificate (PEM)", "certificate"],
     ["CA Bundles", "ca-bundles", "ca_bundle", "ca_bundle_pem", "CA Bundle (PEM)", "CA bundle"],
     ["CRLs", "crls", "crl", "crl_pem", "CRL (PEM)", "CRL"],
     ["OCSP", "ocsp-responses", "ocsp_response", "ocsp_der_base64", "OCSP Response (base64 DER)", "OCSP response"],
     ["JWKS", "jwks", "jwks", "jwks_json", "JWKS Document (JSON)", "JWKS document"],
-  ] as const)("rotates %s in place with PUT, keeping its ID, reference and description", async (
+  ] as const)("rotates %s in place with PUT after re-reading it, keeping its ID, reference and description", async (
     tab, collection, kind, field, requiredLabel, recordLabel,
   ) => {
-    const stored: ManagedTlsRecord = {
-      ...record, kind, description: "Primary listener material",
-      source_uri: `managed://${collection}/edge-cert`,
-    };
+    const stored = managedRecord(collection, kind);
     collections[collection] = [stored];
     mutate.mockImplementation(async (request) => {
       expect(request.method).toBe("PUT");
-      const rotated = { ...stored, subject: "CN=rotated.example.test", updated_at: "2026-09-02T00:00:00Z" };
+      const rotated = { ...stored, updated_at: "2026-09-02T00:00:00Z" };
       collections[collection] = [rotated];
       return Response.json(rotated);
     });
@@ -663,10 +690,16 @@ describe("managed TLS material", () => {
     if (collection === "certificates") {
       await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
     }
+    const readsBefore = listReads(collection);
     await click("Rotate", dialog());
     await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
-    await settle(() => expect(panel().textContent).toContain("CN=rotated.example.test"));
+    // The store re-reads its list after the rotation.
+    await settle(() => expect(listReads(collection)).toBeGreaterThan(readsBefore));
 
+    // The record was re-read immediately before the replacement.
+    const itemReads = requests.filter((request) => request.method === "GET"
+      && new URL(request.url).pathname === `/api/proxy/admin/tls/${collection}/edge-cert`);
+    expect(itemReads).toHaveLength(1);
     expect(writes()).toHaveLength(1);
     expect(writes()[0].method).toBe("PUT");
     expect(new URL(writes()[0].url).pathname).toBe(`/api/proxy/admin/tls/${collection}/edge-cert`);
@@ -677,9 +710,11 @@ describe("managed TLS material", () => {
       [field]: "replacement material",
       ...(collection === "certificates" && { key_pem: keyPem }),
     });
+    // Submitted material does not outlive the dialog.
+    await settle(() => expect(cachedSubmissions("replacement material")).toEqual([]));
 
     // A cancelled rotation leaves nothing behind for the next create.
-    await act(async () => getByRole(panel(), "button", { name: `Rotate ${recordLabel} Edge Certificate` }).click());
+    await openRotation(recordLabel);
     await click("Cancel", dialog());
     await click(`Add ${tab.replace(PLURAL_SUFFIX_PATTERN, "")}`, panel());
     expect(inputByLabel(dialog(), "ID").value).toBe("");
@@ -688,21 +723,94 @@ describe("managed TLS material", () => {
     expect(button("Create", dialog())).toBeTruthy();
   });
 
-  it("shows a rotation's material error inline and keeps the record", async () => {
-    collections.certificates = [record];
-    mutate.mockResolvedValue(Response.json({ error: "cert_pem: no PEM certificates found" }, { status: 400 }));
+  it("refuses a rotation, sending nothing, when the record changed after the dialog opened", async () => {
+    const stored = managedRecord("certificates", "certificate");
+    collections.certificates = [stored];
     await mount("Certificates");
-    await settle(() => expect(panel().textContent).toContain(record.source_uri));
-    await act(async () => getByRole(panel(), "button", { name: "Rotate certificate Edge Certificate" }).click());
-    const cert = getByRole(dialog(), "textbox", { name: "Certificate (PEM)" });
-    await fill(cert, "bad cert");
+    await settle(() => expect(panel().textContent).toContain(stored.source_uri));
+    await openRotation("certificate");
+    // Another administrator renames the record and changes its description.
+    collections.certificates = [{ ...stored, description: "Standby", updated_at: "2026-09-03T00:00:00Z" }];
+    await fill(getByRole(dialog(), "textbox", { name: "Certificate (PEM)" }), certPem);
     await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
     await click("Rotate", dialog());
-    await settle(() => expect(dialog().textContent).toContain("No PEM certificates found"));
-    expect(cert.getAttribute("aria-invalid")).toBe("true");
+    await settle(() => expect(dialog().textContent).toContain("changed after you opened Rotate"));
+    expect(writes()).toHaveLength(0);
+    expect([...dialog().querySelectorAll("button")].map((entry) => entry.textContent?.trim()))
+      .not.toContain("Rotate");
+    await click("Close", dialog());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await settle(() => expect(cachedSubmissions(keyPem)).toEqual([]));
+  });
+
+  it("keeps the dialog, and any next draft, while a rotation is in flight", async () => {
+    const stored = managedRecord("certificates", "certificate");
+    collections.certificates = [stored];
+    let answer: ((response: Response) => void) | undefined;
+    mutate.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    await mount("Certificates");
+    await settle(() => expect(panel().textContent).toContain(stored.source_uri));
+    await openRotation("certificate");
+    await fill(getByRole(dialog(), "textbox", { name: "Certificate (PEM)" }), certPem);
+    await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
+    await click("Rotate", dialog());
+    await settle(() => expect(answer).toBeDefined());
+    expect(button("Cancel", dialog()).disabled).toBe(true);
+    expect(dialog().getAttribute("aria-busy")).toBe("true");
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => answer!(Response.json(stored)));
+    await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+  });
+
+  it("reports a lost answer as an unknown outcome and offers no resend", async () => {
+    const stored = managedRecord("certificates", "certificate");
+    collections.certificates = [stored];
+    mutate.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
+    await mount("Certificates");
+    await settle(() => expect(panel().textContent).toContain(stored.source_uri));
+    await openRotation("certificate");
+    await fill(getByRole(dialog(), "textbox", { name: "Certificate (PEM)" }), certPem);
+    await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
+    await click("Rotate", dialog());
+    await settle(() => expect(dialog().textContent).toContain("may or may not have been applied"));
+    expect(writes()).toHaveLength(1);
+    expect([...dialog().querySelectorAll("button")].map((entry) => entry.textContent?.trim()))
+      .not.toContain("Rotate");
+    expect(document.body.textContent).not.toContain("Could not save");
+    await click("Close", dialog());
+    await settle(() => expect(cachedSubmissions(keyPem)).toEqual([]));
+  });
+
+  it.each([
+    ["Certificates", "certificates", "certificate", "certificate", "Certificate (PEM)",
+      "cert_pem: no PEM certificates found", "No PEM certificates found"],
+    ["JWKS", "jwks", "jwks", "JWKS document", "JWKS Document (JSON)",
+      "jwks_json is not a usable key set: JWKS contains no usable signing key", "JWKS contains no usable signing key"],
+  ] as const)("shows a %s rotation's material error inline and keeps the record", async (
+    tab, collection, kind, recordLabel, fieldLabel, detail, message,
+  ) => {
+    collections[collection] = [managedRecord(collection, kind)];
+    mutate.mockResolvedValue(Response.json({ error: detail }, { status: 400 }));
+    await mount(tab);
+    await settle(() => expect(panel().textContent).toContain(`managed://${collection}/edge-cert`));
+    await openRotation(recordLabel);
+    const material = getByRole(dialog(), "textbox", { name: fieldLabel });
+    await fill(material, "unusable material");
+    if (collection === "certificates") {
+      await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
+    }
+    await click("Rotate", dialog());
+    await settle(() => expect(dialog().textContent).toContain(message));
+    expect(material.getAttribute("aria-invalid")).toBe("true");
     expect(popup).not.toHaveBeenCalled();
     expect(panel().textContent).toContain("Edge Certificate");
     expect(writes()[0].method).toBe("PUT");
+    // Closing the form drops the failed submission, key material included.
+    await click("Cancel", dialog());
+    await settle(() => expect(cachedSubmissions("unusable material")).toEqual([]));
   });
 
   it("names delete actions with the record ID when no friendly name exists", async () => {

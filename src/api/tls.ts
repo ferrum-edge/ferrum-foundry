@@ -464,21 +464,79 @@ export async function createManagedRecord(
   );
 }
 
+/** The fields of a managed record a rotation must not silently revert. */
+export type ManagedRecordBasis = Pick<ManagedTlsRecord, "updated_at" | "name" | "description">;
+
+/**
+ * The record changed between opening the rotation and submitting it, so the
+ * rotation's name and description (which replace the whole record) would
+ * revert someone else's change. Nothing was sent.
+ */
+export class ManagedRecordChangedError extends Error {
+  constructor(readonly id: string) {
+    super(`Managed TLS record ${id} changed after the rotation was opened; nothing was sent`);
+    this.name = "ManagedRecordChangedError";
+  }
+}
+
+/** The pre-rotation re-read failed, so nothing was sent. */
+export class ManagedRecordUnverifiableError extends Error {
+  constructor(readonly id: string, cause: unknown) {
+    super(`Managed TLS record ${id} could not be re-read before rotating; nothing was sent`, { cause });
+    this.name = "ManagedRecordUnverifiableError";
+  }
+}
+
+export async function getManagedRecord(
+  collection: ManagedTlsCollection,
+  id: string,
+): Promise<ManagedTlsRecord> {
+  return proxyApi
+    .get(`admin/tls/${pathSegment(collection)}/${pathSegment(id)}`, {
+      context: FLEET_GLOBAL_SILENT_CONTEXT,
+      retry: 0,
+    })
+    .json<ManagedTlsRecord>();
+}
+
 /**
  * Rotate a managed record in place (`PUT /admin/tls/{collection}/{id}`): the
  * same kind, the same `managed://{collection}/{id}` reference. Edge validates
- * the new material before storing it, and a record still referenced by TLS
- * configuration can only be replaced this way, never deleted.
+ * the new material before storing it. A record still referenced by TLS
+ * configuration cannot be deleted, so replacing it is how its material
+ * changes.
+ *
+ * Edge replaces the whole record and offers no conditional write for the
+ * managed TLS store, so the record is re-read first and the rotation refused
+ * (`ManagedRecordChangedError`) when it no longer matches `basis`, the version
+ * the operator opened. A change landing between that read and the `PUT`
+ * cannot be detected.
  */
 export async function replaceManagedRecord(
   collection: ManagedTlsCollection,
   id: string,
   data: ManagedTlsRequest,
+  basis: ManagedRecordBasis,
 ): Promise<ManagedTlsRecord> {
+  let current: ManagedTlsRecord;
+  try {
+    current = await getManagedRecord(collection, id);
+  } catch (error) {
+    throw new ManagedRecordUnverifiableError(id, error);
+  }
+  if (
+    current.updated_at !== basis.updated_at ||
+    (current.name ?? "") !== (basis.name ?? "") ||
+    (current.description ?? "") !== (basis.description ?? "")
+  ) {
+    throw new ManagedRecordChangedError(id);
+  }
   return withRedactedFailure(secretValues(data), () =>
     proxyApi
       .put(`admin/tls/${pathSegment(collection)}/${pathSegment(id)}`, {
         json: data,
+        // Never replayed: a lost answer is reported as an unknown outcome.
+        retry: 0,
         context: FLEET_GLOBAL_SILENT_CONTEXT,
       })
       .json<ManagedTlsRecord>(),

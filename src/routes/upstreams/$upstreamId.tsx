@@ -42,6 +42,7 @@ import {
   targetIdentities,
 } from "@/lib/upstreamTargets";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
+import { useDraftReload } from "@/hooks/useDraftReload";
 import { useCapabilities } from "@/stores/capabilities";
 import { CapabilityNotice, WriteAction } from "@/components/shared/CapabilityGate";
 import type { Upstream, UpstreamCreate, UpstreamTarget } from "@/api/types";
@@ -214,21 +215,29 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
     }
   });
 
-  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
-  const handleDiscardAndReload = async () => {
+  /**
+   * Deliberate restart: drop the draft and reseed the form from the gateway.
+   * The dialog and draft stay until the fresh read lands (`useDraftReload`).
+   */
+  const draftReload = useDraftReload();
+  const handleDiscardAndReload = () => {
     const source = conflict?.source;
-    setConflict(null);
-    if (source === "targets") {
-      // Only the target draft is discarded; an unsaved settings draft stays.
-      // The list re-renders from the refetch, and the next target editor is
-      // seeded from it.
-      closeTargetEditors();
-      await resourceQuery.refetch();
-      return;
-    }
-    const refreshed = await resourceQuery.refetch();
-    if (refreshed.data) baseline.adopt(refreshed.data);
-    setFormGeneration((generation) => generation + 1);
+    return draftReload.reload(
+      () => resourceQuery.refetch(),
+      (fresh) => {
+        if (source === "targets") {
+          // Only the target draft is discarded; an unsaved settings draft
+          // stays. The list re-renders from the refetch, and the next target
+          // editor is seeded from it.
+          closeTargetEditors();
+        } else {
+          baseline.adopt(fresh);
+          setFormGeneration((generation) => generation + 1);
+        }
+        setConflict(null);
+      },
+      () => toast("error", "Could not re-read the upstream; your draft was kept. Try again."),
+    );
   };
 
   const handleDelete = session.bind(async () => {
@@ -589,8 +598,12 @@ function UpstreamEditor({ session }: { session: EditorSession }) {
       {/* Refused concurrent-edit save */}
       <StaleWriteDialog
         conflict={conflict?.detail ?? null}
-        onKeepEditing={() => setConflict(null)}
-        onDiscardAndReload={handleDiscardAndReload}
+        onKeepEditing={() => {
+          draftReload.abandon();
+          setConflict(null);
+        }}
+        onDiscardAndReload={() => void handleDiscardAndReload()}
+        reloading={draftReload.reloading}
       />
 
       {/* Delete confirmation */}

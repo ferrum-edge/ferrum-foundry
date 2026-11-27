@@ -50,10 +50,12 @@ import {
   useRotateTlsSurface,
   useValidateTlsMaterial,
 } from "@/hooks/useTls";
-import { MutationOutcomeUnknownError } from '@/api/mutationOutcome';
+import { classifyUnobservedOutcome, MutationOutcomeUnknownError } from '@/api/mutationOutcome';
 import {
   acmeOrderInProgress,
   AcmeFinalizationUnknownError,
+  ManagedRecordChangedError,
+  ManagedRecordUnverifiableError,
   getAcmeOrder,
   probeAcmeOrder,
   TLS_VALIDATE_FIELDS,
@@ -256,6 +258,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const [offset, setOffset] = useState(0);
   const page = useManagedTlsRecords(config.collection, { offset, limit: TLS_PAGE_SIZE });
   const { data, isLoading } = page;
+  const queryClient = useQueryClient();
   const createRecord = useCreateManagedTlsRecord(config.collection);
   const rotateRecord = useRotateManagedTlsRecord(config.collection);
   const deleteRecord = useDeleteManagedTlsRecord(config.collection);
@@ -269,6 +272,10 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const [deleteTarget, setDeleteTarget] = useState<ManagedTlsRecord | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // A write whose answer was lost, or a rotation refused because the record
+  // changed: reported inside the dialog, which then offers no second submit.
+  const [dialogNotice, setDialogNotice] = useState<string | null>(null);
+  const writing = createRecord.isPending || rotateRecord.isPending;
 
   const records = data?.data ?? [];
   const setField = (key: string, value: string) => {
@@ -278,22 +285,42 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
     setFieldErrors((errors) => clearTlsFieldError(errors, key));
   };
 
+  // Submitted key material must not outlive the dialog: reset both settled
+  // mutations so no observer keeps their variables in the mutation cache.
+  const forgetSubmissions = () => {
+    createRecord.reset();
+    rotateRecord.reset();
+  };
+
   const closeCreate = () => {
+    // The dialog belongs to its write until the write settles.
+    if (writing) return;
     setCreateOpen(false);
     setRotateTarget(null);
     setForm({});
     setFieldErrors({});
+    setDialogNotice(null);
+    forgetSubmissions();
+  };
+
+  const openCreate = () => {
+    setRotateTarget(null);
+    setForm({});
+    setFieldErrors({});
+    setDialogNotice(null);
+    setCreateOpen(true);
   };
 
   const openRotate = (target: ManagedTlsRecord) => {
     setRotateTarget(target);
     setForm({ name: target.name ?? "" });
     setFieldErrors({});
+    setDialogNotice(null);
     setCreateOpen(true);
   };
 
   const handleCreate = async () => {
-    if (!canWrite.allowed) return;
+    if (!canWrite.allowed || writing || dialogNotice) return;
     for (const field of config.fields) {
       if (field.required && !form[field.key]?.trim()) {
         toast("error", `${field.label} is required`);
@@ -311,7 +338,15 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
         if (form[field.key]?.trim()) payload[field.key] = form[field.key];
       }
       if (rotateTarget) {
-        await rotateRecord.mutateAsync({ id: rotateTarget.id, data: payload as never });
+        await rotateRecord.mutateAsync({
+          id: rotateTarget.id,
+          data: payload as never,
+          basis: {
+            updated_at: rotateTarget.updated_at,
+            name: rotateTarget.name,
+            description: rotateTarget.description,
+          },
+        });
         toast("success", `${config.title} record rotated`);
       } else {
         await createRecord.mutateAsync(payload as never);
@@ -321,7 +356,30 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
       setRotateTarget(null);
       setForm({});
       setFieldErrors({});
+      forgetSubmissions();
     } catch (err) {
+      if (err instanceof ManagedRecordChangedError) {
+        setDialogNotice(
+          "This record changed after you opened Rotate, so nothing was sent: rotating " +
+            "would have replaced its newer name or description. Close this dialog and " +
+            "open Rotate again to start from its current version.",
+        );
+        return;
+      }
+      if (err instanceof ManagedRecordUnverifiableError) {
+        toast("error", "Could not re-read the record before rotating; nothing was sent. Try again.");
+        return;
+      }
+      if (classifyUnobservedOutcome(err)) {
+        // The write may have been applied: re-read, and do not offer a resend.
+        void queryClient.invalidateQueries({ queryKey: ["tls"] });
+        setDialogNotice(
+          `The gateway's answer was lost, so the ${rotateTarget ? "rotation" : "upload"} ` +
+            "may or may not have been applied. Nothing will be sent again from here. " +
+            "Close this dialog and check the record before trying again.",
+        );
+        return;
+      }
       // The gateway rejects unusable material with `field: message` naming the
       // request key. Show it under that field instead of toasting ky's
       // "status 400 ... <url>" wrapper over the same sentence.
@@ -346,7 +404,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <p className="text-text-muted text-sm max-w-2xl">{config.description}</p>
-        <Button size="sm" disabled={!canWrite.allowed} onClick={() => setCreateOpen(true)}>
+        <Button size="sm" disabled={!canWrite.allowed} onClick={openCreate}>
           Add {config.title.replace(PLURAL_SUFFIX_PATTERN, "")}
         </Button>
       </div>
@@ -430,7 +488,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
 
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreate())}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-h-[85vh] overflow-y-auto" busy={writing}>
           <DialogTitle>
             {rotateTarget
               ? `Rotate ${config.recordLabel} ${rotateTarget.name || rotateTarget.id}`
@@ -493,13 +551,18 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
               />
             ),
           )}
+          {dialogNotice && (
+            <p role="alert" className="text-sm text-warning">{dialogNotice}</p>
+          )}
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={closeCreate}>
-              Cancel
+            <Button variant="secondary" onClick={closeCreate} disabled={writing}>
+              {dialogNotice ? "Close" : "Cancel"}
             </Button>
-            <Button onClick={handleCreate} loading={rotateTarget ? rotateRecord.isPending : createRecord.isPending}>
-              {rotateTarget ? "Rotate" : "Create"}
-            </Button>
+            {!dialogNotice && (
+              <Button onClick={handleCreate} loading={writing}>
+                {rotateTarget ? "Rotate" : "Create"}
+              </Button>
+            )}
           </div>
           </div>
         </DialogContent>

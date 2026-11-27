@@ -91,13 +91,15 @@ test.describe("two sessions editing one proxy", () => {
     // The gateway is the witness: the first operator's save survived.
     expect(await storedReadTimeout()).toBe(11111);
 
-    // Reloading drops the draft and shows what the gateway holds now.
+    // Reloading drops the draft and shows what the gateway holds now. The
+    // dialog stays until the fresh read lands, then the editor remounts with
+    // its sections collapsed: wait for that remount, not for a moment.
     await conflict.getByRole("button", { name: "Discard my draft and reload" }).click();
     await expect(second.getByRole("dialog")).toHaveCount(0);
+    const timeoutsToggle = second.getByRole("button", { name: BACKEND_TIMEOUTS_PATTERN });
+    await expect(timeoutsToggle).toHaveAttribute("aria-expanded", "false");
+    await timeoutsToggle.click();
     const reloaded = second.getByLabel("Read Timeout (ms)", { exact: true });
-    if (!(await reloaded.isVisible())) {
-      await second.getByRole("button", { name: BACKEND_TIMEOUTS_PATTERN }).click();
-    }
     await expect(reloaded).toHaveValue("11111");
 
     // On the fresh version, the second operator's save goes through.

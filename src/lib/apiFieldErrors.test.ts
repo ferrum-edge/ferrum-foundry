@@ -35,6 +35,10 @@ describe("parseFieldError", () => {
       "jwks_json must be valid JSON: expected value at line 1 column 1",
       { field: "jwks_json", message: "Expected value at line 1 column 1" },
     ],
+    [
+      "jwks_json is not a usable key set: JWKS contains no usable signing key",
+      { field: "jwks_json", message: "JWKS contains no usable signing key" },
+    ],
   ] as const)("parses the Edge v0.9.9 TLS validation detail %s", (detail, expected) => {
     expect(parseFieldError(detail, TLS_FIELDS)).toEqual(expected);
   });

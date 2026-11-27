@@ -40,6 +40,7 @@ import type { ConsumerCreate, Consumer } from "@/api/types";
 import * as consumersApi from "@/api/consumers";
 import { isStaleResourceError, validatorOf, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
+import { useDraftReload } from "@/hooks/useDraftReload";
 import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 import { formatDateTime } from "@/lib/format";
 
@@ -172,13 +173,20 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
     }
   });
 
-  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
-  const handleDiscardAndReload = async () => {
-    setConflict(null);
-    const refreshed = await resourceQuery.refetch();
-    if (refreshed.data) baseline.adopt(refreshed.data);
-    setFormGeneration((generation) => generation + 1);
-  };
+  /**
+   * Deliberate restart: drop the draft and reseed the form from the gateway.
+   * The dialog and draft stay until the fresh read lands (`useDraftReload`).
+   */
+  const draftReload = useDraftReload();
+  const handleDiscardAndReload = () => draftReload.reload(
+    () => resourceQuery.refetch(),
+    (fresh) => {
+      baseline.adopt(fresh);
+      setFormGeneration((generation) => generation + 1);
+      setConflict(null);
+    },
+    () => toast("error", "Could not re-read the consumer; your draft was kept. Try again."),
+  );
 
   const handleDelete = session.bind(async () => {
     if (!consumer || !capability.allowed) return;
@@ -404,8 +412,12 @@ function ConsumerEditor({ session }: { session: EditorSession }) {
       {/* Refused concurrent-edit save or delete */}
       <StaleWriteDialog
         conflict={conflict}
-        onKeepEditing={() => setConflict(null)}
-        onDiscardAndReload={handleDiscardAndReload}
+        onKeepEditing={() => {
+          draftReload.abandon();
+          setConflict(null);
+        }}
+        onDiscardAndReload={() => void handleDiscardAndReload()}
+        reloading={draftReload.reloading}
       />
 
       <ConfirmDialog

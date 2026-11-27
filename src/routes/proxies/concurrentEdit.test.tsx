@@ -238,6 +238,39 @@ describe("a proxy save refused as stale", () => {
     expect(inputByLabel(host, "Backend Host").value).toBe(GATEWAY_HOST);
   });
 
+  it("keeps the dialog and the draft until the reload's fresh read lands", async () => {
+    let land: (() => void) | undefined;
+    refetch.mockImplementationOnce(() => new Promise((resolve) => {
+      land = () => {
+        served = proxyAt(GATEWAY_HOST);
+        resolve({ data: served });
+      };
+    }));
+    await render();
+    setField("Backend Host", "typed-by-operator.internal");
+    await clickButton("Update Proxy");
+    await clickButton("Discard my draft and reload");
+
+    // The read is still in flight: nothing is replaced yet.
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(inputByLabel(host, "Backend Host").value).toBe("typed-by-operator.internal");
+    await act(async () => land!());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(inputByLabel(host, "Backend Host").value).toBe(GATEWAY_HOST);
+  });
+
+  it("keeps the dialog and the draft when the reload cannot re-read the proxy", async () => {
+    refetch.mockImplementationOnce(async () => ({ data: undefined, isError: true }) as never);
+    await render();
+    setField("Backend Host", "typed-by-operator.internal");
+    await clickButton("Update Proxy");
+    await clickButton("Discard my draft and reload");
+
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(inputByLabel(host, "Backend Host").value).toBe("typed-by-operator.internal");
+    expect(toast).toHaveBeenCalledWith("error", "Could not re-read the proxy; your draft was kept. Try again.");
+  });
+
   it("refuses a delete of a proxy that changed, without offering to delete anyway", async () => {
     deleteMutateAsync.mockRejectedValueOnce(
       new StaleResourceError({
