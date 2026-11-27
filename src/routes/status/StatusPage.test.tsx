@@ -13,6 +13,9 @@ vi.mock('@/stores/namespace', () => ({
 vi.mock('@/components/shared/BffConnectionCard', () => ({
   BffConnectionCard: () => null,
 }));
+vi.mock('@/components/diagnostics/DiagnosticLookupCard', () => ({
+  DiagnosticLookupCard: () => null,
+}));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 class BasedRequest extends Request {

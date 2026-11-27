@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { BffConnectionCard } from "@/components/shared/BffConnectionCard";
+import { DiagnosticLookupCard } from "@/components/diagnostics/DiagnosticLookupCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ReadStateNotice } from "@/components/shared/ReadState";
 import { formatDateTime } from "@/lib/format";
@@ -134,6 +135,7 @@ export default function StatusPage() {
         {header}
         <div className={GRID}>
           <BffConnectionCard />
+          <DiagnosticLookupCard />
           <SkeletonCard />
           <SkeletonCard />
         </div>
@@ -150,6 +152,7 @@ export default function StatusPage() {
         {header}
         <div className={GRID}>
           <BffConnectionCard />
+          <DiagnosticLookupCard />
           <ReadStateNotice query={query} label="Health status" />
         </div>
       </div>
@@ -161,6 +164,7 @@ export default function StatusPage() {
       {header}
       <div className={GRID}>
         <BffConnectionCard />
+          <DiagnosticLookupCard />
       </div>
     </div>
   );
@@ -175,6 +179,7 @@ export default function StatusPage() {
           screens; notices that qualify everything below span both. */}
       <div className={GRID}>
         <BffConnectionCard />
+          <DiagnosticLookupCard />
 
         {/* Gateway process details are separate from Foundry connectivity. */}
         <Card>

@@ -233,6 +233,7 @@ jobs:
             --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
             --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
             --env FERRUM_BASIC_AUTH_HMAC_SECRET=contract-basic-auth-hmac-secret-at-least-32-characters \
+            --env FERRUM_DIAGNOSTIC_REFS=errors \
             "$FERRUM_EDGE_IMAGE"
 
       - name: Start the same gateway with its admin API read-only
@@ -276,6 +277,19 @@ jobs:
           FERRUM_JWT_AUDIENCE: ferrum-admin
         run: npm exec -- vitest run --project server server/routes/service-manifest.gateway.test.ts
 
+      - name: Verify the diagnostic reference lookup against the gateway
+        # The contract gateway stamps X-Ferrum-Diagnostic-Ref on its own error
+        # responses (FERRUM_DIAGNOSTIC_REFS=errors). The BFF route must resolve
+        # one for a role in FERRUM_DIAGNOSTICS_ROLES and refuse any other role.
+        env:
+          FERRUM_DIAGNOSTICS_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/diagnostics.gateway.test.ts
+
       - name: Seed twice and verify canonical backup state
         env:
           FERRUM_ADMIN_URL: http://127.0.0.1:9000
@@ -287,6 +301,19 @@ jobs:
           FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
           FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
         run: npm run test:gateway-contract
+
+      - name: Measure 1,000-record collections through the BFF
+        # Seeds 1,000 proxies and 1,000 upstreams in a disposable namespace and
+        # reads them back through Foundry's BFF as the UI does (list pages, one
+        # editor, complete traversals). Correctness is asserted; request
+        # counts, bytes and elapsed time go to the job summary.
+        env:
+          FERRUM_SCALE_GATEWAY_CONTRACT: 'true'
+          FERRUM_SCALE_RECORDS: '1000'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/scale.gateway.test.ts
 
       - name: Verify role and read-only capability parity
         # viewer, operator, and admin against the read-only gateway. The
@@ -494,6 +521,40 @@ jobs:
           . ./.env
           set +a
           node ../../scripts/starter-journey.mjs
+
+      - name: Keep diagnostic lookup targets out of the starter's logs and redirects
+        # A mistaken client can put a credential in a lookup path. Neither the
+        # proxy's access log, the BFF's log, nor a sign-in redirect may carry
+        # it, including with an escaped API prefix and without a session.
+        working-directory: deploy/starter
+        run: |
+          set -euo pipefail
+          sentinel="foundry-ci-sentinel-${GITHUB_RUN_ID}-${RANDOM}${RANDOM}"
+          # The supported form carries the reference in a header, which no log
+          # records; the path forms are what a mistaken client might still send.
+          signed_in="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header 'X-Demo-Identity: admin' \
+            --header "X-Ferrum-Diagnostic-Ref: https://user:${sentinel}@elsewhere.test" \
+            "http://127.0.0.1:8088/api/diagnostics/lookup")"
+          test "$signed_in" = 403 || test "$signed_in" = 400
+          legacy="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header 'X-Demo-Identity: admin' \
+            "http://127.0.0.1:8088/api/diagnostics/refs/https%3A%2F%2Fuser%3A${sentinel}%40elsewhere.test?token=${sentinel}")"
+          test "$legacy" = 400
+          for target in "/api/diagnostics/refs/${sentinel}" "/%61pi/diagnostics/refs/${sentinel}"; do
+            headers="$(curl --silent --output /dev/null --dump-header - "http://127.0.0.1:8088${target}")"
+            echo "$headers" | head -1 | grep -q ' 401'
+            if echo "$headers" | grep -qi "$sentinel"; then
+              echo "an unauthenticated lookup echoed its target" >&2
+              exit 1
+            fi
+          done
+          docker compose --profile demo logs --no-color > "${RUNNER_TEMP}/starter.log"
+          if grep -q "$sentinel" "${RUNNER_TEMP}/starter.log"; then
+            echo "a diagnostic lookup target reached the starter's logs:" >&2
+            grep "$sentinel" "${RUNNER_TEMP}/starter.log" | head -5 >&2
+            exit 1
+          fi
 
       - name: Show stack logs on failure
         if: failure()

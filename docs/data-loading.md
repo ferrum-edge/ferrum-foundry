@@ -86,6 +86,11 @@ These are request counts and response sizes from the Node/jsdom test
 environment. They are not browser latency, which depends on hardware, network,
 and rendering; no latency figure is claimed.
 
+Against the real pinned gateway, the Pinned Gateway Contract job seeds 1,000
+proxies and 1,000 upstreams and reads them back through the BFF on every run;
+the measured requests, bytes and in-process BFF request times are in
+[Tested scale](compatibility.md#tested-scale).
+
 ## Where each rule applies
 
 ### Proxy list page

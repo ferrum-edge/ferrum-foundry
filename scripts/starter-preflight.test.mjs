@@ -696,6 +696,22 @@ test("the BFF receives only nginx's forwarded headers and request ID", async () 
   }
 });
 
+test("both proxies keep diagnostic lookup targets out of their access logs and redirects", async () => {
+  const production = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
+  const demo = await readFile(new URL("nginx/foundry.demo.conf", STARTER), "utf8");
+  for (const [config, name] of [[production, "foundry.conf"], [demo, "foundry.demo.conf"]]) {
+    // Selected on the normalized $uri, so /%61pi/diagnostics/ is covered.
+    assert.ok(config.includes("map $uri $foundry_logged_request {"), `${name} must redact lookup request lines`);
+    assert.ok(config.includes("~^/api/diagnostics/"), `${name} must select lookup paths`);
+    assert.ok(config.includes('"$foundry_logged_request"'), `${name} must log the redacted request line`);
+    const main = config.slice(config.lastIndexOf("server {"));
+    assert.ok(main.includes("access_log /var/log/nginx/access.log foundry_redacted;"), `${name} must use the redacted log format`);
+    const signin = locationBlock(config, "location @signin {", name);
+    assert.ok(signin.includes("if ($uri ~ ^/api/)"), `${name} must classify API requests on the normalized $uri`);
+    assert.ok(!signin.includes("if ($request_uri"), `${name} must not classify on the raw request target`);
+  }
+});
+
 test("an unmapped identity is denied by the shared policy's default", async () => {
   const policy = await readFile(new URL("nginx/identity/policy.conf", STARTER), "utf8");
   assert.match(policy, MAP_AUTH_GROUPS_FERRUM_ROLE_DEFAULT_PATTERN);

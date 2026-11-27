@@ -205,7 +205,9 @@ routes; there the BFF is the only ceiling, and it refuses the same routes.
   BFF confines writes to the session's grants, and Edge authorizes the claim in
   its registry handlers), `GET /live`, `GET /health`, and `GET /status`.
   Foundry does not forward `GET /overload` or Edge's
-  `GET /diagnostics/v1/refs/{ref}` for a scoped session.
+  `GET /diagnostics/v1/refs/{ref}` for a scoped session; references are
+  resolved only through the dedicated
+  [diagnostic reference lookup](#diagnostic-reference-lookup).
 - **Health summary.** Edge v0.9.15 and earlier answer an `ns`-claim JWT with
   the detailed `/health` and `/status` view: listeners, `dp_config`,
   `cp_dp_trust`, database, and cached-config detail. Edge v0.9.16+ answer it
@@ -345,6 +347,39 @@ and every session, unrestricted administrators included, before capacity
 admission, JWT signing or upstream fetch. Operators who need it call the Edge
 admin API directly with their own `operator` token and `?confirm=true`; Edge
 audits it. See [Admin API coverage](admin-api-coverage.md).
+
+### Diagnostic reference lookup
+
+`GET /api/diagnostics/lookup` resolves an Edge `X-Ferrum-Diagnostic-Ref`
+(`fd1_…` or `fd2_…`), sent in a request header of the same name, for the
+Status page's lookup card. The reference is never part of the request target,
+so neither the BFF's log, a reverse proxy's access log, nor an nginx error
+line (which quotes the request line) can record it. The earlier path form
+`/api/diagnostics/refs/…` is refused with a fixed `400`. Edge requires the
+`diagnostics:read` scope and an `ns` claim, and never implies the scope from a
+role. Foundry grants it only to the roles listed in `FERRUM_DIAGNOSTICS_ROLES`,
+which is empty by default, so no session may look references up until the
+deployment opts a role in. `GET /api/diagnostics/config` tells the UI whether
+to show the card; the route refuses an unlisted role with
+`403 FERRUM_BFF_DIAGNOSTICS_NOT_PERMITTED` whatever the UI shows, before
+anything else is parsed or sent.
+
+A listed role's lookup carries one `X-Ferrum-Namespace` the session is granted
+(any valid name for an unrestricted session). The BFF signs a token for that
+one lookup: the session's subject and role, `ns` set to that namespace,
+`scope: diagnostics:read`, and a lifetime of at most 60 seconds. Ordinary
+`/api/proxy` tokens never carry the scope. A lookup whose client goes away is
+aborted at the gateway and frees its admission slot at once.
+
+The BFF never logs a lookup's request target, and it answers a rejected one
+with a fixed body. Keep the reverse proxy in front of it from logging the
+target too: the starter's nginx profiles log `/api/diagnostics/` requests with
+the reference replaced by `[redacted]` (`$foundry_logged_request` in
+`deploy/starter/nginx/foundry.conf`), selected on the normalized `$uri`, and
+classify API requests for the sign-in refusal on `$uri` as well, so an escaped
+prefix is never echoed into a redirect. Do the same in your own proxy. Budgets, the response projection
+and the fixed failure codes are in
+[ADR 0001](adr/0001-alloy-authenticated-presentation.md#implemented-slice).
 
 ### Runtime identity defaults
 
