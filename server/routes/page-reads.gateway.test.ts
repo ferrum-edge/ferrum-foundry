@@ -28,6 +28,12 @@ interface PageRead {
 
 const WHITESPACE_RUNS_PATTERN = /\s+/g;
 const PIPE_PATTERN = /\|/g;
+const BACKSLASH_PATTERN = /\\/g;
+
+/** `text` as one Markdown table cell: backslashes first, then pipes. */
+function tableCell(text: string): string {
+  return text.replace(BACKSLASH_PATTERN, '\\\\').replace(PIPE_PATTERN, '\\|');
+}
 
 const PAGE = '?offset=0&limit=50';
 const PAGE_READS: PageRead[] = [
@@ -159,7 +165,7 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
             note = detail;
             failures.push(`${target.mode} ${read.page} ${read.path}: ${status} ${detail}`);
           }
-          rows.push(`| ${target.mode} | ${read.page} | \`${read.path.split('?')[0]}\` | ${status} | ${note.replace(PIPE_PATTERN, '\\|')} |`);
+          rows.push(`| ${target.mode} | ${read.page} | \`${read.path.split('?')[0]}\` | ${status} | ${tableCell(note)} |`);
         }
 
         // The Metrics page and the Dashboard hide /admin/metrics values that
