@@ -4,7 +4,7 @@
 # every database starts empty. Admin APIs listen on 127.0.0.1:9000 (and, for
 # the CP + DP pair, the data plane's on 127.0.0.1:9010).
 #
-#   scripts/gateway-modes/up.sh file|cp-dp|mesh|postgres|mysql
+#   scripts/gateway-modes/up.sh file|cp-dp|mesh|postgres|mysql|mongodb
 set -euo pipefail
 
 mode="${1:?mode}"
@@ -14,6 +14,7 @@ admin_secret="contract-admin-signing-secret-at-least-32-characters"
 sync_secret="contract-cp-dp-sync-secret-distinct-at-least-32-chars"
 hmac_secret="contract-basic-auth-hmac-secret-at-least-32-characters"
 namespace="ferrum-foundry-demo"
+db_extra=()
 mkdir -p "$work"
 docker network create ferrum-modes >/dev/null 2>&1 || true
 
@@ -209,13 +210,39 @@ YAML
     fi
     ;;&
 
-  postgres|mysql)
+  mongodb)
+    if [ "$mode" = mongodb ]; then
+      # A one-member replica set: Edge needs one for transactions (snapshot
+      # full reloads, crash-atomic change records); a standalone server falls
+      # back to full reloads.
+      docker run --detach --name ferrum-modes-db --network ferrum-modes \
+        mongo@sha256:479e85ced54ffb8a40dade1dcde2da2a9ae858515b9415e9cc54bfb8f0575d01 \
+        --replSet rs0 --bind_ip_all
+      for _attempt in $(seq 1 60); do
+        if docker exec ferrum-modes-db mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' >/dev/null 2>&1; then break; fi
+        sleep 2
+      done
+      docker exec ferrum-modes-db mongosh --quiet --eval \
+        'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "ferrum-modes-db:27017" }] })'
+      for _attempt in $(seq 1 60); do
+        if [ "$(docker exec ferrum-modes-db mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null)" = true ]; then break; fi
+        sleep 2
+      done
+      test "$(docker exec ferrum-modes-db mongosh --quiet --eval 'db.hello().isWritablePrimary')" = true
+      db_type=mongodb
+      db_url='mongodb://ferrum-modes-db:27017/?replicaSet=rs0'
+      db_extra=(--env FERRUM_MONGO_REPLICA_SET=rs0 --env FERRUM_MONGO_DATABASE=ferrum)
+    fi
+    ;;&
+
+  postgres|mysql|mongodb)
     docker run --detach --name ferrum-edge-mode --network ferrum-modes \
       --publish 127.0.0.1:9000:9000 --publish 127.0.0.1:8000:8000 \
       --add-host host.docker.internal:host-gateway \
       --env FERRUM_MODE=database \
       --env "FERRUM_DB_TYPE=$db_type" \
       --env "FERRUM_DB_URL=$db_url" \
+      "${db_extra[@]}" \
       --env FERRUM_PROXY_BIND_ADDRESS=0.0.0.0 \
       --env "FERRUM_BASIC_AUTH_HMAC_SECRET=$hmac_secret" \
       "${common_admin[@]}" \

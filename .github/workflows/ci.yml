@@ -336,14 +336,15 @@ jobs:
   gateway-modes:
     # The pinned Edge image in every gateway mode Foundry claims besides
     # database-on-SQLite (Pinned Gateway Contract): file mode, a CP + DP pair,
-    # a mesh sidecar on a local mesh document, and database mode on PostgreSQL
-    # and MySQL. Each gateway starts from an empty database or a fresh file.
+    # a mesh sidecar on a local mesh document, and database mode on PostgreSQL,
+    # MySQL and MongoDB. Each gateway starts from an empty database or a fresh
+    # file.
     name: Gateway Modes (${{ matrix.mode }})
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
-        mode: [file, cp-dp, mesh, postgres, mysql]
+        mode: [file, cp-dp, mesh, postgres, mysql, mongodb]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -381,7 +382,7 @@ jobs:
       # Each check below runs once the gateway is up, whatever an earlier check
       # concluded, so one failure never hides another mode's results.
       - name: Seed twice and verify canonical backup state on this database
-        if: ${{ !cancelled() && steps.up.outcome == 'success' && (matrix.mode == 'postgres' || matrix.mode == 'mysql') }}
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && (matrix.mode == 'postgres' || matrix.mode == 'mysql' || matrix.mode == 'mongodb') }}
         env:
           FERRUM_ADMIN_URL: http://127.0.0.1:9000
           FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
