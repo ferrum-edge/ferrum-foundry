@@ -149,7 +149,7 @@ update the marker. A new Edge route is refused to scoped sessions until
 | `GET` | `/backend-egress-policy` | Unused | Refused | Not read; the Cluster page shows the per-data-plane reports from `GET /cluster`. Withheld from scoped sessions (least privilege). |
 | `GET` | `/backend-capabilities` | UI | Refused | `src/api/ops.ts` (Cluster page). Fleet-global. |
 | `POST` | `/backend-capabilities/refresh` | UI | Refused | `src/api/ops.ts` (Cluster page, operator). Fleet-global. |
-| `GET` | `/diagnostics/v1/refs/{ref}` | Unused | Refused | No diagnostic-reference import exists in Foundry. Fleet-global. |
+| `GET` | `/diagnostics/v1/refs/{ref}` | UI | Refused | `server/routes/diagnostics.ts` (Status page, Diagnostic reference lookup), through the dedicated `GET /api/diagnostics/lookup` route (reference in the `X-Ferrum-Diagnostic-Ref` header), which signs a per-lookup token with `diagnostics:read` and the tab's namespace for a role in `FERRUM_DIAGNOSTICS_ROLES`. The generic `/api/proxy` path still refuses it to scoped sessions, and Edge refuses its tokens, which never carry the scope. |
 
 ### Mesh
 
@@ -271,8 +271,7 @@ Operators who need it call the Edge admin API directly with their own
   never sends that flag, so an upload can never overwrite a record by accident. `GET /gateway-trust-bundles/{id}` stays inside the ceiling's resource
   item class: it reads one bundle of a granted namespace, which the session
   can already read through the list Foundry uses, so it grants nothing new,
-  and narrowing the class would only split one route pattern for no gain. `GET /diagnostics/v1/refs/{ref}` is unused because Foundry has no
-  diagnostic-reference import.
+  and narrowing the class would only split one route pattern for no gain.
 - `GET /consumers/{id}/verification` and `GET /deployment-snapshot` return
   credential-complete evidence and are denied; see
   [authentication](authentication.md#credential-complete-reconciliation-reads).

@@ -49,6 +49,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     authLogoutUrl: undefined,
     secureCookies: true,
     enableHsts: false,
+    diagnosticsRoles: [],
     ...overrides,
   };
 }

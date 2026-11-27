@@ -21,6 +21,21 @@ function normalizeAudience(audience) {
   return values.length === 1 ? values[0] : values;
 }
 
+// RFC 6749 section 3.3 scope-token: printable ASCII except space, `"` and `\`.
+const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
+
+function normalizeScopes(scopes) {
+  if (scopes === undefined) return undefined;
+  if (!Array.isArray(scopes) || scopes.length === 0) {
+    throw new Error('scopes must be a non-empty array when provided');
+  }
+  const values = [...new Set(scopes)];
+  if (values.some((entry) => typeof entry !== 'string' || !SCOPE_TOKEN_PATTERN.test(entry))) {
+    throw new Error('scopes contains an invalid scope token');
+  }
+  return values;
+}
+
 function normalizeNamespaces(namespaces) {
   if (namespaces === undefined) return undefined;
   if (!Array.isArray(namespaces) || namespaces.length === 0) {
@@ -45,6 +60,7 @@ export async function signAdminJwt({
   role,
   audience,
   namespaces,
+  scopes,
   ttlSeconds,
   now = Math.floor(Date.now() / 1000),
   jti = randomUUID(),
@@ -70,6 +86,10 @@ export async function signAdminJwt({
   if (normalizedNamespaces) {
     claims.ns = normalizedNamespaces.length === 1 ? normalizedNamespaces[0] : normalizedNamespaces;
   }
+  // An OAuth 2.0 space-delimited `scope`. Only a caller that has authorized
+  // the scope passes it: no role implies one (Edge's diagnostics lookup).
+  const normalizedScopes = normalizeScopes(scopes);
+  if (normalizedScopes) claims.scope = normalizedScopes.join(' ');
 
   let signer = new SignJWT(claims)
     .setProtectedHeader({ alg: 'HS256' })

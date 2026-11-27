@@ -135,6 +135,7 @@ There is no override. Generate each secret with `openssl rand -base64 48`.
 | `FERRUM_SECURE_COOKIES` | No | `true` when `NODE_ENV=production`, else `false` | `true`/`false` | Sets `Secure` and the `__Host-` cookie name prefix |
 | `FERRUM_BFF_AUTH_TOKEN` | In `static` | - | 32 characters or more, not a published placeholder (see below) | Development-only token exchanged once at `POST /api/auth/login` |
 | `FERRUM_ALLOW_INSECURE_STATIC_AUTH` | No | `false` | `true`/`false` | Allows static auth under `NODE_ENV=production`. Do not use it |
+| `FERRUM_DIAGNOSTICS_ROLES` | No | empty (no role) | comma-separated `viewer`, `operator`, `admin`; any other value is a startup error | Roles whose sessions may resolve gateway diagnostic references on the Status page. Edge requires the `diagnostics:read` scope, which no role implies, admin included; Foundry grants it, on a per-lookup token, only to the roles listed here. See [Diagnostic reference lookup](authentication.md#diagnostic-reference-lookup) |
 
 ### Downstream JWT claims
 

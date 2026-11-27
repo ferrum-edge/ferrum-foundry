@@ -7,6 +7,8 @@ export interface AdminJwtOptions {
   role: AdminJwtRole;
   audience?: string | string[];
   namespaces?: string[];
+  /** OAuth 2.0 scope tokens, signed as one space-delimited `scope` claim. */
+  scopes?: string[];
   ttlSeconds: number;
   now?: number;
   jti?: string;

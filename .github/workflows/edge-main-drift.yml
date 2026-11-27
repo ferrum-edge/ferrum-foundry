@@ -216,6 +216,7 @@ jobs:
             --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
             --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
             --env FERRUM_BASIC_AUTH_HMAC_SECRET=contract-basic-auth-hmac-secret-at-least-32-characters \
+            --env FERRUM_DIAGNOSTIC_REFS=errors \
             "$FERRUM_EDGE_IMAGE"
 
       - name: Start the same gateway with its admin API read-only
@@ -263,6 +264,22 @@ jobs:
           FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
           FERRUM_JWT_AUDIENCE: ferrum-admin
         run: npm exec -- vitest run --project server server/routes/service-manifest.gateway.test.ts
+
+      - name: Verify the diagnostic reference lookup against the gateway
+        # The contract gateway stamps X-Ferrum-Diagnostic-Ref on its own error
+        # responses (FERRUM_DIAGNOSTIC_REFS=errors). The BFF route must resolve
+        # one for a role in FERRUM_DIAGNOSTICS_ROLES and refuse any other role.
+        id: diagnostics
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          FERRUM_DIAGNOSTICS_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/diagnostics.gateway.test.ts
 
       - name: Seed twice and verify canonical backup state
         id: seed
@@ -323,7 +340,7 @@ jobs:
         run: npm exec -- vitest run --project frontend src/api/editorSave.gateway.test.ts
 
       - name: Show gateway logs on failure
-        if: failure() || steps.ready.outcome == 'failure' || steps.manifest.outcome == 'failure' || steps.seed.outcome == 'failure' || steps.scale.outcome == 'failure' || steps.parity.outcome == 'failure' || steps.editor-save.outcome == 'failure'
+        if: failure() || steps.ready.outcome == 'failure' || steps.manifest.outcome == 'failure' || steps.diagnostics.outcome == 'failure' || steps.seed.outcome == 'failure' || steps.scale.outcome == 'failure' || steps.parity.outcome == 'failure' || steps.editor-save.outcome == 'failure'
         run: |
           docker logs ferrum-edge-contract
           docker logs ferrum-edge-read-only
@@ -348,6 +365,7 @@ jobs:
           STATIC: ${{ steps.static.outputs.result }}
           READY: ${{ steps.ready.outcome }}
           MANIFEST: ${{ steps.manifest.outcome }}
+          DIAGNOSTICS: ${{ steps.diagnostics.outcome }}
           SEED: ${{ steps.seed.outcome }}
           SCALE: ${{ steps.scale.outcome }}
           PARITY: ${{ steps.parity.outcome }}
@@ -377,7 +395,7 @@ jobs:
             [ "${entry#*=}" = success ] || failed_setup="$failed_setup ${entry%%=*}"
           done
           outcome=clean
-          for result in "$STATIC" "$READY" "$MANIFEST" "$SEED" "$SCALE" "$PARITY" "$EDITOR_SAVE"; do
+          for result in "$STATIC" "$READY" "$MANIFEST" "$DIAGNOSTICS" "$SEED" "$SCALE" "$PARITY" "$EDITOR_SAVE"; do
             case "$result" in
               pass | success) ;;
               *) outcome=drift ;;
@@ -407,6 +425,7 @@ jobs:
             echo "| Guided plugin schemas, plugin sensitivity table and server-owned subset fields at the Edge commit | $(verdict "$STATIC") |"
             echo "| Gateway starts with Foundry's contract environment | $(verdict "$READY") |"
             echo "| Alloy preview and explicit HTTP resource mapping | $(verdict "$MANIFEST") |"
+            echo "| Diagnostic reference lookup through the BFF | $(verdict "$DIAGNOSTICS") |"
             echo "| Seed twice and verify canonical backup state (\`npm run test:gateway-contract\`) | $(verdict "$SEED") |"
             echo "| 1,000-record collections read back through the BFF | $(verdict "$SCALE") |"
             echo "| Role and read-only capability parity | $(verdict "$PARITY") |"

@@ -80,7 +80,7 @@ to the paired Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
 Foundry adopts only the 37 files listed in its pin: it does not vendor the
 deployment-snapshot or backend-egress-policy schemas or adopt the native
-deployment profile, and it has no diagnostic import (a 1.0 limitation). The pin's
+deployment profile, and it imports no Alloy diagnostic report. The pin's
 release and qualification evidence are in the
 [pairing record](docs/compatibility.md#qualification-evidence).
 The [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes

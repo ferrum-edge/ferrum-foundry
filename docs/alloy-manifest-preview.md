@@ -187,4 +187,5 @@ and the accepted shared status; this Foundry pin update does not qualify
 arbitrary newer consumer sources or authorize Alloy crate publication. Root
 owns those decisions.
 The [presentation-boundary ADR](adr/0001-alloy-authenticated-presentation.md)
-separates this implemented preview from future diagnostic presentation.
+covers both this preview and the gateway diagnostic reference lookup on the
+Status page; it does not import Alloy diagnostic reports.

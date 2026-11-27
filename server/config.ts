@@ -78,6 +78,12 @@ export interface Config {
   authLogoutUrl: string | undefined;
   secureCookies: boolean;
   enableHsts: boolean;
+  /**
+   * Foundry roles whose sessions may resolve Edge diagnostic references
+   * (`FERRUM_DIAGNOSTICS_ROLES`). Empty by default: Edge's
+   * `diagnostics:read` scope is never implied by a role, admin included.
+   */
+  diagnosticsRoles: GatewayRole[];
 }
 
 export interface RuntimeConfig {
@@ -205,6 +211,11 @@ function parseInteger(
 function parseRole(value: string, name: string): GatewayRole {
   if (value === 'viewer' || value === 'operator' || value === 'admin') return value;
   throw new Error(`${name} must be viewer, operator, or admin`);
+}
+
+function parseDiagnosticsRoles(): GatewayRole[] {
+  const values = parseList(optionalEnv('FERRUM_DIAGNOSTICS_ROLES')) ?? [];
+  return values.map((value) => parseRole(value, 'FERRUM_DIAGNOSTICS_ROLES entries'));
 }
 
 function parseList(value: string | undefined): string[] | undefined {
@@ -598,6 +609,7 @@ function parseBaseConfig(): Config {
     authLogoutUrl: parseAuthRedirect(optionalEnv('FERRUM_AUTH_LOGOUT_URL'), 'FERRUM_AUTH_LOGOUT_URL'),
     secureCookies,
     enableHsts,
+    diagnosticsRoles: parseDiagnosticsRoles(),
   };
 }
 

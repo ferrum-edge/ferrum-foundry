@@ -136,6 +136,11 @@ See `docs/authentication.md`.
 - Auth runs in `onRequest`, before content parsing.
 - The authenticated actor, role, and namespaces become the downstream JWT
   `sub`, `role`, and `ns` claims.
+- Diagnostic reference lookup (`server/routes/diagnostics.ts`, Status page)
+  is the only token that carries a `scope`: `diagnostics:read`, minted per
+  lookup for a role listed in `FERRUM_DIAGNOSTICS_ROLES` (empty by default)
+  and bound to one granted namespace. Never imply the scope from a role or add
+  it to the ordinary proxy token (ADR 0001).
 
 ### Capabilities
 
