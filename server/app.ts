@@ -9,6 +9,7 @@ import { authPlugin } from './auth.js';
 import { loadConfig } from './config.js';
 import proxyPlugin from './proxy.js';
 import { requestIsApiRoute, servesSpaShell } from './proxy-path.js';
+import diagnosticsPlugin from './routes/diagnostics.js';
 import healthPlugin from './routes/health.js';
 import settingsPlugin from './routes/settings.js';
 import serviceManifestPlugin, { serviceManifestRequestLogging } from './routes/service-manifest.js';
@@ -113,6 +114,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await fastify.register(healthPlugin);
   await fastify.register(settingsPlugin);
   await fastify.register(serviceManifestPlugin);
+  await fastify.register(diagnosticsPlugin);
   await fastify.register(proxyPlugin);
 
   if (serveStatic) {
