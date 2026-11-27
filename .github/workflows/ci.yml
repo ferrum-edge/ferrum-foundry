@@ -348,10 +348,13 @@ jobs:
           done
 
       - name: Start the gateway in this mode
+        id: up
         run: scripts/gateway-modes/up.sh "${{ matrix.mode }}"
 
+      # Each check below runs once the gateway is up, whatever an earlier check
+      # concluded, so one failure never hides another mode's results.
       - name: Seed twice and verify canonical backup state on this database
-        if: matrix.mode == 'postgres' || matrix.mode == 'mysql'
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && (matrix.mode == 'postgres' || matrix.mode == 'mysql') }}
         env:
           FERRUM_ADMIN_URL: http://127.0.0.1:9000
           FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
@@ -364,7 +367,7 @@ jobs:
         run: npm run test:gateway-contract
 
       - name: Verify writable capability parity on the control plane
-        if: matrix.mode == 'cp-dp'
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && matrix.mode == 'cp-dp' }}
         env:
           FERRUM_ADMIN_URL: http://127.0.0.1:9000
           FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
@@ -377,7 +380,7 @@ jobs:
       - name: Verify read-only capability parity
         # file, the data plane of the CP + DP pair, and mesh are read-only by
         # mode; the UI must refuse exactly the writes the gateway refuses.
-        if: matrix.mode == 'file' || matrix.mode == 'cp-dp' || matrix.mode == 'mesh'
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && (matrix.mode == 'file' || matrix.mode == 'cp-dp' || matrix.mode == 'mesh') }}
         env:
           FERRUM_ADMIN_URL: ${{ matrix.mode == 'cp-dp' && 'http://127.0.0.1:9010' || 'http://127.0.0.1:9000' }}
           FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
@@ -387,6 +390,7 @@ jobs:
         run: node scripts/capability-parity-contract.mjs
 
       - name: Verify every page read through the BFF
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
         env:
           FERRUM_PAGE_READS_GATEWAY_CONTRACT: 'true'
           FERRUM_PAGE_READ_TARGETS: >-

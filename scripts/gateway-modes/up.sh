@@ -53,6 +53,9 @@ proxies:
     backend_host: host.docker.internal
     backend_port: 9101
     strip_listen_path: true
+upstreams: []
+consumers: []
+plugin_configs: []
 YAML
     chmod 0644 "$work/file/config.yaml"
     docker run --detach --name ferrum-edge-mode \
@@ -100,7 +103,7 @@ YAML
     dir="$work/mesh"
     trust_domain="cluster.local"
     spiffe="spiffe://$trust_domain/ns/$namespace/sa/modes"
-    mkdir -p "$dir/ca" "$dir/svid"
+    mkdir -p "$dir/ca" "$dir/svid" "$dir/state"
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
       -keyout "$dir/ca/root.key" -out "$dir/ca/root.crt" \
       -days 2 -subj "/CN=foundry-ci-mesh-root" \
@@ -153,6 +156,9 @@ YAML
       --user "$(id -u):$(id -g)" \
       --publish 127.0.0.1:9000:9000 \
       --volume "$dir/svid:/etc/ferrum-mesh:ro" \
+      --volume "$dir/state:/var/lib/ferrum-modes" \
+      --env FERRUM_ADMIN_AUDIT_FALLBACK_PATH=/var/lib/ferrum-modes/audit \
+      --env FERRUM_ADMIN_AUDIT_SPOOL_DIR=/var/lib/ferrum-modes/audit-spool \
       --env FERRUM_MODE=mesh \
       --env FERRUM_MESH_TOPOLOGY=sidecar \
       --env FERRUM_MESH_CONFIG_PROTOCOL=file \

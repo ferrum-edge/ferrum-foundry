@@ -85,10 +85,17 @@ BFF may reach the throwaway gateway over plaintext on the compose network.
 Without it, Foundry refuses a plaintext admin URL to any host but loopback;
 the production `.env` leaves it `false` and uses `https`.
 
+It also sets `FERRUM_SECURE_COOKIES=false` and `FERRUM_ENABLE_HSTS=false`,
+because the demo is plain HTTP: Safari and other WebKit browsers keep a
+`Secure` cookie only over HTTPS, even on loopback, so with secure cookies they
+would drop Foundry's session and CSRF cookies and every write would be
+refused. The production profile serves HTTPS and keeps both on.
+
 The demo publishes only loopback ports (`FOUNDRY_DEMO_PORT` 8088,
 `FERRUM_DEMO_PROXY_PORT` 8000, `FERRUM_DEMO_ADMIN_PORT` 9000), and its identity
 stub trusts a request header (`X-Demo-Identity: admin`, `operator`, `viewer`,
-or `unmapped`). It is for a first run and for CI. Do not expose it.
+or `unmapped`). It is for a first run and for CI, on loopback only: never
+publish it on another interface or put it behind a public address.
 
 ## Production
 

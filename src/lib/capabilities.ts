@@ -73,6 +73,20 @@ const NAMESPACE_SCOPE_EXPLANATION =
   "namespace grants do not scope. Only an administrator without namespace grants " +
   "can change it.";
 
+/**
+ * Gateway modes that hold no proxy state: a control plane serves configuration
+ * to data planes and proxies nothing itself, and a node agent manages capture.
+ * Edge answers their mesh egress dry-run `503 {"error":"No proxy state
+ * available"}` (`docs/admin_api.md`, `POST /mesh/egress-scope/test`) after the
+ * role check, so the action is unavailable there whatever the role.
+ */
+const NO_PROXY_STATE_MODES = new Set(["cp", "node_agent"]);
+
+const NO_PROXY_STATE_EXPLANATION =
+  "This gateway holds no proxy state (it runs as a control plane or a node agent), " +
+  "so it answers fleet operational actions such as the mesh egress dry-run with " +
+  "503 \"No proxy state available\". Run them against a data plane.";
+
 const NODE_AGENT_EXPORT_EXPLANATION =
   "The gateway runs in node-agent mode: it has neither a configuration database " +
   "nor a cached configuration, so configuration export is unavailable.";
@@ -95,7 +109,7 @@ export type CapabilitySurface =
   | "fleetOperations"
   | "bffSettings";
 
-export type CapabilityBlocker = "role" | "namespace-scope" | "gateway-read-only";
+export type CapabilityBlocker = "role" | "namespace-scope" | "gateway-read-only" | "gateway-unavailable";
 
 export interface CapabilityVerdict {
   /** False only when a read fact positively proves the write would be denied. */
@@ -448,6 +462,17 @@ export function resolveCapability(
       blockedBy: "namespace-scope",
       summary: "Requires an administrator without namespace grants",
       explanation: NAMESPACE_SCOPE_EXPLANATION,
+    };
+  }
+
+  if (surface === "fleetOperations" && NO_PROXY_STATE_MODES.has(observedMode(facts) ?? "")) {
+    return {
+      allowed: false,
+      label,
+      headline,
+      blockedBy: "gateway-unavailable",
+      summary: "The gateway holds no proxy state",
+      explanation: NO_PROXY_STATE_EXPLANATION,
     };
   }
 

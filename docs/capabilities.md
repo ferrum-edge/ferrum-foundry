@@ -101,7 +101,7 @@ namespace registry, and audit.
 | `upstreams` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /upstreams` |
 | `pluginConfigs` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /plugins/config` |
 | `operationalActions` (`POST /admin/tls/validate`) | `operator` | `none`, fleet-wide | no gate |
-| `fleetOperations` (backend-capability refresh, mesh egress dry-run) | `operator` | `none`, fleet-wide | role check only in `POST /backend-capabilities/refresh` and `POST /mesh/egress-scope/test` |
+| `fleetOperations` (backend-capability refresh, mesh egress dry-run) | `operator` | `none`, fleet-wide; unavailable on `cp` and `node_agent` | role check only in `POST /backend-capabilities/refresh` and `POST /mesh/egress-scope/test`; a gateway with no proxy state then answers `503 {"error":"No proxy state available"}`, shown as unavailable (`gateway-unavailable`) with that reason, never as admitted |
 | `tlsRotation` (`POST /admin/tls/rotate/{surface}`) | `operator` | `none`, fleet-wide | `admit_audited_operation` in `handle_rotate` |
 | `consumers` | `admin` | `config-store` | `admit_write` on `POST/PUT/DELETE /consumers` |
 | `consumerCredentials` | `admin` | `config-store` | `admit_write` on `/consumers/{id}/credentials/{type}` |

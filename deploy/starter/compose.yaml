@@ -57,6 +57,10 @@ services:
       FERRUM_AUTH_LOGIN_URL: ${FERRUM_AUTH_LOGIN_URL:-/oauth2/start}
       FERRUM_AUTH_LOGOUT_URL: ${FERRUM_AUTH_LOGOUT_URL:-/oauth2/sign_out}
       FERRUM_ENABLE_HSTS: ${FERRUM_ENABLE_HSTS:-true}
+      # Secure, __Host- cookies. Only the HTTP-only demo bootstrap turns this
+      # off: browsers that do not treat plain-HTTP loopback as secure (Safari,
+      # WebKit) would otherwise drop the session and CSRF cookies.
+      FERRUM_SECURE_COOKIES: ${FERRUM_SECURE_COOKIES:-true}
       # Failed proxy-proof throttle (docs/authentication.md, "Failed-authentication
       # lockout"). 0 failures disables it.
       FERRUM_AUTH_MAX_FAILURES: ${FERRUM_AUTH_MAX_FAILURES:-10}

@@ -121,12 +121,13 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
         const scopedHeaders = await signIn(namespace);
 
         const health = await app.inject({ method: 'GET', url: '/api/proxy/health', headers });
-        const snapshot = health.json();
-        rows.push(`| ${target.mode} | Status | \`/health\` | ${health.statusCode} | mode \`${snapshot?.mode}\` |`);
+        const snapshot: unknown = health.json();
+        const reportedMode = (snapshot as { mode?: unknown } | null)?.mode;
+        rows.push(`| ${target.mode} | Status | \`/health\` | ${health.statusCode} | mode \`${String(reportedMode)}\` |`);
         if (!isGatewayHealthSnapshot(snapshot) || ![200, 503].includes(health.statusCode)) {
           failures.push(`${target.mode} /health: ${health.statusCode} without a valid snapshot`);
-        } else if (snapshot.mode !== target.mode) {
-          failures.push(`${target.mode} /health: reports mode ${String(snapshot.mode)}`);
+        } else if (reportedMode !== target.mode) {
+          failures.push(`${target.mode} /health: reports mode ${String(reportedMode)}`);
         }
 
         for (const read of PAGE_READS) {

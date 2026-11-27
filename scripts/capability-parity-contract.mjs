@@ -216,6 +216,15 @@ export function isNoDatabaseRestore(response) {
   return response.status === 503 && response.body?.error === "No database";
 }
 
+/**
+ * Edge's documented answer when it holds no proxy state (a control plane or a
+ * node agent): `POST /mesh/egress-scope/test` returns this typed `503` after
+ * the role check (`docs/admin_api.md`).
+ */
+export function isNoProxyState(response) {
+  return response.status === 503 && response.body?.error === "No proxy state available";
+}
+
 /** Classify a response as the gateway's own refusal, or `null` if admitted. */
 export function classifyDenial(response) {
   if (response.status !== 403) return null;
@@ -252,6 +261,7 @@ function describeExpected(verdict, surface) {
   if (verdict.blockedBy === "role") {
     return `role denial requiring ${capabilityRequirement(surface).minimumRole}`;
   }
+  if (verdict.blockedBy === "gateway-unavailable") return '503 "No proxy state available"';
   return "read-only denial";
 }
 
@@ -320,6 +330,10 @@ async function comparePrincipal(send, { expectation, observed, scoped, mismatche
       } else if (verdict.blockedBy === "role") {
         agrees = denial?.kind === "role"
           && denial.requiredRole === capabilityRequirement(surface).minimumRole;
+      } else if (verdict.blockedBy === "gateway-unavailable") {
+        // A gateway without proxy state: Edge checks the role, then answers
+        // this typed 503. Never an admission, and the model must not offer it.
+        agrees = isNoProxyState(response);
       } else {
         // File/DP restore answers the documented `503 {"error":"No database"}`
         // before the read-only gate; under a read-only expectation that is an
