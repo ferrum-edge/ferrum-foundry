@@ -1548,6 +1548,19 @@ export const server = createServer(async (req, res) => {
       list.push(record);
       return send(201, record);
     }
+    if (method === 'PUT' && id) {
+      // In-place rotation: same id, kind and reference; new material metadata.
+      const existing = list.find((entry) => entry.id === id);
+      if (!existing) return send(404, { error: 'not found' });
+      Object.assign(existing, {
+        name: body.name ?? existing.name,
+        ...(body.description !== undefined && { description: body.description }),
+        subject: 'CN=rotated.example.com',
+        not_after: new Date(Date.now() + 90 * 86400000).toISOString(),
+        updated_at: now(),
+      });
+      return send(200, existing);
+    }
     const [status, payload] = crud(list, url, method, id, body, {}, ns);
     return send(status, payload);
   }

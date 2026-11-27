@@ -16,6 +16,7 @@ const WHITESPACE_RUN_PATTERN = /\s+/;
 const WHITESPACE_RUNS_PATTERN = /\s+/g;
 const UUID_PATTERN = /^[0-9a-f-]{36}$/;
 const RENEW_PATTERN = /^renew-[0-9a-f]{32}$/;
+const PLURAL_SUFFIX_PATTERN = /s$/;
 
 const at = "2026-09-01T00:00:00Z";
 // Deliberately invalid cryptographic material: these fixtures only exercise
@@ -620,6 +621,88 @@ describe("managed TLS material", () => {
     await settle(() => expect(document.body.textContent).toContain("certificate is still referenced"));
     expect(panel().textContent).toContain("Edge Certificate");
     expect(writes()).toHaveLength(2);
+  });
+
+  it.each([
+    ["Certificates", "certificates", "certificate", "cert_pem", "Certificate (PEM)", "certificate"],
+    ["CA Bundles", "ca-bundles", "ca_bundle", "ca_bundle_pem", "CA Bundle (PEM)", "CA bundle"],
+    ["CRLs", "crls", "crl", "crl_pem", "CRL (PEM)", "CRL"],
+    ["OCSP", "ocsp-responses", "ocsp_response", "ocsp_der_base64", "OCSP Response (base64 DER)", "OCSP response"],
+    ["JWKS", "jwks", "jwks", "jwks_json", "JWKS Document (JSON)", "JWKS document"],
+  ] as const)("rotates %s in place with PUT, keeping its ID, reference and description", async (
+    tab, collection, kind, field, requiredLabel, recordLabel,
+  ) => {
+    const stored: ManagedTlsRecord = {
+      ...record, kind, description: "Primary listener material",
+      source_uri: `managed://${collection}/edge-cert`,
+    };
+    collections[collection] = [stored];
+    mutate.mockImplementation(async (request) => {
+      expect(request.method).toBe("PUT");
+      const rotated = { ...stored, subject: "CN=rotated.example.test", updated_at: "2026-09-02T00:00:00Z" };
+      collections[collection] = [rotated];
+      return Response.json(rotated);
+    });
+    await mount(tab);
+    await settle(() => expect(panel().textContent).toContain(stored.source_uri));
+    const rotate = getByRole(panel(), "button", { name: `Rotate ${recordLabel} Edge Certificate` });
+    expect(rotate.title).toBe(`Rotate ${recordLabel} Edge Certificate`);
+    await act(async () => rotate.click());
+    expect(dialog().textContent).toContain(`Rotate ${recordLabel} Edge Certificate`);
+    expect(dialog().textContent).toContain(`Replaces the stored material of ${stored.source_uri} in place`);
+    const id = inputByLabel(dialog(), "ID");
+    expect(id.value).toBe("edge-cert");
+    expect(id.readOnly).toBe(true);
+    expect(inputByLabel(dialog(), "Name").value).toBe("Edge Certificate");
+
+    await click("Rotate", dialog());
+    await settle(() => expect(document.body.textContent).toContain(`${requiredLabel} is required`));
+    expect(writes()).toHaveLength(0);
+
+    await fill(getByRole(dialog(), "textbox", { name: requiredLabel }), "replacement material");
+    if (collection === "certificates") {
+      await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
+    }
+    await click("Rotate", dialog());
+    await settle(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    await settle(() => expect(panel().textContent).toContain("CN=rotated.example.test"));
+
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].method).toBe("PUT");
+    expect(new URL(writes()[0].url).pathname).toBe(`/api/proxy/admin/tls/${collection}/edge-cert`);
+    expect(writes()[0].headers.has("X-Ferrum-Namespace")).toBe(false);
+    expect(await writes()[0].json()).toEqual({
+      name: "Edge Certificate",
+      description: "Primary listener material",
+      [field]: "replacement material",
+      ...(collection === "certificates" && { key_pem: keyPem }),
+    });
+
+    // A cancelled rotation leaves nothing behind for the next create.
+    await act(async () => getByRole(panel(), "button", { name: `Rotate ${recordLabel} Edge Certificate` }).click());
+    await click("Cancel", dialog());
+    await click(`Add ${tab.replace(PLURAL_SUFFIX_PATTERN, "")}`, panel());
+    expect(inputByLabel(dialog(), "ID").value).toBe("");
+    expect(inputByLabel(dialog(), "ID").readOnly).toBe(false);
+    expect(inputByLabel(dialog(), "Name").value).toBe("");
+    expect(button("Create", dialog())).toBeTruthy();
+  });
+
+  it("shows a rotation's material error inline and keeps the record", async () => {
+    collections.certificates = [record];
+    mutate.mockResolvedValue(Response.json({ error: "cert_pem: no PEM certificates found" }, { status: 400 }));
+    await mount("Certificates");
+    await settle(() => expect(panel().textContent).toContain(record.source_uri));
+    await act(async () => getByRole(panel(), "button", { name: "Rotate certificate Edge Certificate" }).click());
+    const cert = getByRole(dialog(), "textbox", { name: "Certificate (PEM)" });
+    await fill(cert, "bad cert");
+    await fill(getByRole(dialog(), "textbox", { name: "Private Key (PEM)" }), keyPem);
+    await click("Rotate", dialog());
+    await settle(() => expect(dialog().textContent).toContain("No PEM certificates found"));
+    expect(cert.getAttribute("aria-invalid")).toBe("true");
+    expect(popup).not.toHaveBeenCalled();
+    expect(panel().textContent).toContain("Edge Certificate");
+    expect(writes()[0].method).toBe("PUT");
   });
 
   it("names delete actions with the record ID when no friendly name exists", async () => {

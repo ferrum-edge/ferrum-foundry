@@ -117,15 +117,6 @@ export async function list(
     .json<PaginatedResponse<GatewayTrustBundle>>();
 }
 
-export async function get(
-  scope: NamespaceScope,
-  id: string,
-): Promise<GatewayTrustBundle> {
-  return proxyApi
-    .get(`gateway-trust-bundles/${pathSegment(id)}`, scoped(scope))
-    .json<GatewayTrustBundle>();
-}
-
 export async function create(
   scope: NamespaceScope,
   data: GatewayTrustBundleCreate,

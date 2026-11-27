@@ -813,6 +813,7 @@ so the next successful read seeds a fresh baseline.
 | Committed and unobserved credential writes disarm the card and reconcile before a retry | `src/routes/consumers/credentialCommittedWrite.test.tsx` |
 | Mock gateway precondition contract | `scripts/mock-admin-gateway.test.mjs` |
 | Real gateway behavior and the `If-Match` contract | `scripts/concurrent-edit-contract.mjs` |
+| Two browser sessions on one proxy: the stale save is refused, the gateway keeps the other save, reload then save succeeds | `e2e/journeys/two-session-edit.spec.ts` (Critical Journeys) |
 
 ## Local development
 
@@ -825,13 +826,10 @@ be used to test guesses of a redacted value.
 
 ## Known limitations (1.0)
 
-These are deliberate, bounded limits of the 1.0 write guard:
+This is a deliberate, bounded limit of the 1.0 write guard:
 
 - **Untagged writes outside the guard.** A cached read cannot establish an
   atomic guard: Edge cannot tag a cache that may lag the database. Adopted
   policy #542 refuses guarded writes from it; explicitly unguarded operations
   and membership plans keep their untagged behavior, as described in
   [Without a tag](#without-a-tag).
-- **No browser-level two-session journey.** Concurrent edits are covered by
-  the unit and component tests and the gateway contract listed above, not by
-  a two-browser journey in the critical-journey suite (`e2e/journeys`).

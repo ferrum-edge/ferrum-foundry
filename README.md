@@ -161,7 +161,7 @@ database or copy Edge's schema or migrations into this repository.
   default config templates, per-instance execution triggers, and
   global/proxy/group scope.
 - **TLS management**: fleet-global certificate, CA, CRL, OCSP, and JWKS
-  stores; ACME order automation (HTTP-01, TLS-ALPN-01, DNS-01); inventory with
+  stores (upload, in-place rotation of a referenced record, delete); ACME order automation (HTTP-01, TLS-ALPN-01, DNS-01); inventory with
   expiry tracking; surface rotation; and PEM validation. See
   [waiting-operation deadlines](docs/deployment.md#live-apply-monitoring-and-acme-issuance-deadlines)
   for live-apply monitoring and re-checking interrupted issuance.

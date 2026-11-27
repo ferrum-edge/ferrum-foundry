@@ -44,6 +44,19 @@ export function useCreateManagedTlsRecord(collection: tls.ManagedTlsCollection) 
   });
 }
 
+export function useRotateManagedTlsRecord(collection: tls.ManagedTlsCollection) {
+  const qc = useQueryClient();
+  return useMutation({
+    // Discard submitted key material as soon as the form resets/unmounts.
+    gcTime: 0,
+    mutationFn: ({ id, data }: { id: string; data: tls.ManagedTlsRequest }) =>
+      tls.replaceManagedRecord(collection, id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tls"] });
+    },
+  });
+}
+
 export function useDeleteManagedTlsRecord(collection: tls.ManagedTlsCollection) {
   const qc = useQueryClient();
   return useMutation({

@@ -464,6 +464,27 @@ export async function createManagedRecord(
   );
 }
 
+/**
+ * Rotate a managed record in place (`PUT /admin/tls/{collection}/{id}`): the
+ * same kind, the same `managed://{collection}/{id}` reference. Edge validates
+ * the new material before storing it, and a record still referenced by TLS
+ * configuration can only be replaced this way, never deleted.
+ */
+export async function replaceManagedRecord(
+  collection: ManagedTlsCollection,
+  id: string,
+  data: ManagedTlsRequest,
+): Promise<ManagedTlsRecord> {
+  return withRedactedFailure(secretValues(data), () =>
+    proxyApi
+      .put(`admin/tls/${pathSegment(collection)}/${pathSegment(id)}`, {
+        json: data,
+        context: FLEET_GLOBAL_SILENT_CONTEXT,
+      })
+      .json<ManagedTlsRecord>(),
+  );
+}
+
 export async function removeManagedRecord(
   collection: ManagedTlsCollection,
   id: string,

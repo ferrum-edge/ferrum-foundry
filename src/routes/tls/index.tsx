@@ -35,6 +35,7 @@ import {
   useManagedTlsRecords,
   useCreateManagedTlsRecord,
   useDeleteManagedTlsRecord,
+  useRotateManagedTlsRecord,
   useAcmeCertificates,
   useAcmeOrders,
   useAcmeAccounts,
@@ -256,11 +257,15 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
   const page = useManagedTlsRecords(config.collection, { offset, limit: TLS_PAGE_SIZE });
   const { data, isLoading } = page;
   const createRecord = useCreateManagedTlsRecord(config.collection);
+  const rotateRecord = useRotateManagedTlsRecord(config.collection);
   const deleteRecord = useDeleteManagedTlsRecord(config.collection);
   const { capabilities } = useCapabilities();
   const canWrite = capabilities.tlsMaterial;
 
   const [createOpen, setCreateOpen] = useState(false);
+  // Set while the dialog rotates an existing record in place rather than
+  // creating one: same kind, same ID, same `managed://` reference.
+  const [rotateTarget, setRotateTarget] = useState<ManagedTlsRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedTlsRecord | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -275,7 +280,16 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
 
   const closeCreate = () => {
     setCreateOpen(false);
+    setRotateTarget(null);
+    setForm({});
     setFieldErrors({});
+  };
+
+  const openRotate = (target: ManagedTlsRecord) => {
+    setRotateTarget(target);
+    setForm({ name: target.name ?? "" });
+    setFieldErrors({});
+    setCreateOpen(true);
   };
 
   const handleCreate = async () => {
@@ -288,14 +302,23 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
     }
     try {
       const payload: Record<string, string | boolean> = {};
-      if (form.id?.trim()) payload.id = form.id.trim();
+      if (!rotateTarget && form.id?.trim()) payload.id = form.id.trim();
       if (form.name?.trim()) payload.name = form.name.trim();
+      // A rotation replaces the whole record: keep the description the
+      // record already has, since this dialog does not edit it.
+      if (rotateTarget?.description) payload.description = rotateTarget.description;
       for (const field of config.fields) {
         if (form[field.key]?.trim()) payload[field.key] = form[field.key];
       }
-      await createRecord.mutateAsync(payload as never);
-      toast("success", `${config.title} record created`);
+      if (rotateTarget) {
+        await rotateRecord.mutateAsync({ id: rotateTarget.id, data: payload as never });
+        toast("success", `${config.title} record rotated`);
+      } else {
+        await createRecord.mutateAsync(payload as never);
+        toast("success", `${config.title} record created`);
+      }
       setCreateOpen(false);
+      setRotateTarget(null);
       setForm({});
       setFieldErrors({});
     } catch (err) {
@@ -367,6 +390,17 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                     </p>
                   )}
                 </div>
+                <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!canWrite.allowed}
+                  onClick={() => openRotate(record)}
+                  aria-label={`Rotate ${config.recordLabel} ${record.name || record.id}`}
+                  title={`Rotate ${config.recordLabel} ${record.name || record.id}`}
+                >
+                  Rotate
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -379,6 +413,7 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
                 </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -396,14 +431,28 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
       {/* Create dialog */}
       <Dialog open={createOpen} onOpenChange={(open) => (open ? setCreateOpen(true) : closeCreate())}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
-          <DialogTitle>{`Add ${config.title.replace(PLURAL_SUFFIX_PATTERN, "")}`}</DialogTitle>
+          <DialogTitle>
+            {rotateTarget
+              ? `Rotate ${config.recordLabel} ${rotateTarget.name || rotateTarget.id}`
+              : `Add ${config.title.replace(PLURAL_SUFFIX_PATTERN, "")}`}
+          </DialogTitle>
+          {rotateTarget && (
+            <DialogDescription className="mt-2">
+              Replaces the stored material of {rotateTarget.source_uri} in place. Every TLS
+              configuration that references it keeps the reference. The gateway validates the
+              new material before storing it, and running listeners either switch to it or keep
+              serving the previous material. This is a fleet-global record shared by every
+              namespace.
+            </DialogDescription>
+          )}
           <div className="space-y-4 mt-4">
           <div className="grid grid-cols-2 gap-3">
             <Input
               label="ID"
-              value={form.id ?? ""}
+              value={rotateTarget ? rotateTarget.id : (form.id ?? "")}
               onChange={(e) => setField("id", e.target.value)}
               placeholder="Auto-generated"
+              readOnly={!!rotateTarget}
             />
             <Input
               label="Name"
@@ -448,8 +497,8 @@ function ManagedRecordsTab({ config }: { config: ManagedTabConfig }) {
             <Button variant="secondary" onClick={closeCreate}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} loading={createRecord.isPending}>
-              Create
+            <Button onClick={handleCreate} loading={rotateTarget ? rotateRecord.isPending : createRecord.isPending}>
+              {rotateTarget ? "Rotate" : "Create"}
             </Button>
           </div>
           </div>
