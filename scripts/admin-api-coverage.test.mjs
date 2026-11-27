@@ -128,10 +128,15 @@ describe("parseOpenApiOperations", () => {
   });
 });
 
-function tableFor(rows) {
+const TABLE_HEADER = ["| Method | Path | Foundry | Scoped session | Where or why |", "| --- | --- | --- | --- | --- |"];
+
+function markerLine() {
   const digest = createHash("sha256").update(SPEC).digest("hex");
-  const header = `<!-- admin-api-coverage source_commit=${"a".repeat(40)} spec_sha256=${digest} paths=2 operations=3 -->`;
-  return parseCoverageTable([header, ...rows].join("\n"));
+  return `<!-- admin-api-coverage source_commit=${"a".repeat(40)} spec_sha256=${digest} paths=2 operations=3 -->`;
+}
+
+function tableFor(rows) {
+  return parseCoverageTable([markerLine(), "", ...TABLE_HEADER, ...rows].join("\n"));
 }
 
 describe("checkCoverage", () => {
@@ -168,5 +173,28 @@ describe("checkCoverage", () => {
     assert.throws(() => tableFor(["| `GET` | `/a` | UI | Allowed | why |", "| `GET` | `/a` | UI | Allowed | why |"]), /appears twice/);
     assert.throws(() => tableFor(["| `GET` | /a | UI |"]), /malformed coverage row/);
     assert.throws(() => parseCoverageTable("| `GET` | `/a` | UI | Allowed | why |"), /no admin-api-coverage marker/);
+  });
+
+  it("parses every rendered body row whatever its spacing, so a duplicate or extra row cannot hide", () => {
+    // Two spaces after the opening pipe, and an indented row: GitHub renders both.
+    assert.throws(() => tableFor([rows[0], "|  `GET` | `/live` | UI | Allowed | why |"]), /GET \/live appears twice/);
+    const extra = tableFor([...rows, "   |  `PUT`  |  `/live`  | UI | Allowed | why |"]);
+    assert.ok(checkCoverage(SPEC, extra, "a".repeat(40)).includes("in the table but not in the spec: PUT /live"));
+    // A body row without a leading pipe still renders as a row.
+    assert.throws(() => tableFor([rows[0], "`PUT` | `/live` | UI | Allowed | why |"]), /malformed coverage row/);
+  });
+
+  it("refuses table rows outside a coverage table and a header without a separator", () => {
+    assert.throws(
+      () => parseCoverageTable([markerLine(), "", "| `GET` | `/live` | Unused | Allowed | why |"].join("\n")),
+      /table row outside a coverage table/,
+    );
+    assert.throws(
+      () => parseCoverageTable([markerLine(), "", TABLE_HEADER[0], rows[0]].join("\n")),
+      /header without a separator/,
+    );
+    // A blank line ends a table; a later pipe line needs its own header.
+    assert.throws(() => tableFor([rows[0], "", rows[1]]), /table row outside a coverage table/);
+    assert.equal(tableFor([rows[0], "", ...TABLE_HEADER, rows[1]]).rows.length, 2);
   });
 });

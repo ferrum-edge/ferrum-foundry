@@ -652,7 +652,7 @@ CI. Report problems; they do not block releases.
 
 ## Not qualified
 
-These are deliberate limits of what a Foundry release qualifies, stated for
+These are deliberate limits of what a Foundry release qualifies and supports, stated for
 every release from 1.0.0 onward; a change to them is recorded here and in the
 release notes.
 
@@ -662,12 +662,14 @@ release notes.
   waypoint, trust, chargeback and chargeback sink views are therefore
   unqualified: they are built against the paired release's documented
   response shapes and unit-tested against fixtures only.
-- Any Foundry version that is not a published release, and any published
-  Foundry release against an Edge release other than the one its immutable
-  record names ([History](#history)). A prepared release (`status:
-  "candidate"` in [`compatibility.json`](compatibility.json)) is not qualified
-  until its hosted qualification passes. Previous successful qualification
-  cannot qualify a moved pin.
+- Support applies to published releases only: any published Foundry release
+  against an Edge release other than the one its immutable record names
+  ([History](#history)) is unsupported, as is any unpublished build. Hosted
+  qualification is a separate gate before publication: the prepared release
+  (`status: "candidate"` in [`compatibility.json`](compatibility.json)) must
+  pass it, with the run recorded in `qualification`, before it can be tagged
+  (see [The Edge release to pair with](#the-edge-release-to-pair-with)).
+  Previous successful qualification cannot qualify a moved pin.
 - For the version in `foundry.version`, any Ferrum Edge release other than
   `edge.release` and any Ferrum Edge image other than `edge.image`, including
   the eBPF variants of the same release.

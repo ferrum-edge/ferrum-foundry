@@ -184,16 +184,19 @@ grants into exactly that claim, so it offers such a session nothing Edge would
 refuse. Edge v0.9.15 and earlier admit an `ns`-claim JWT on fleet-global
 routes; there the BFF is the only ceiling, and it refuses the same routes.
 
-- **Allowed namespace-scoped routes** are the subset of Edge's
-  `namespace_scoped_resource_kind` that Foundry uses: the `proxies`,
-  `upstreams`, `consumers`, `plugins/config`, `api-specs`, and
-  `gateway-trust-bundles` resources; the `gateway-trust` status; `GET /backup`
-  and `POST /restore`; `GET /proxies/{id}/mcp/tools`; and `GET /audit`. Edge
-  also classifies `GET /config/export`, `GET /backend-egress-policy`, and
-  `POST /batch` as namespace-scoped; Foundry uses none of them, so the ceiling
-  refuses them (least privilege; see
-  [Admin API coverage](admin-api-coverage.md)). Each allowed route must name one
-  of the session's grants in `X-Ferrum-Namespace`. Consumer credentials take only the methods Edge
+- **Allowed namespace-scoped routes** are route classes (methods plus a path
+  pattern) drawn from Edge's `namespace_scoped_resource_kind`: collection
+  `GET`/`POST` and item `GET`/`PUT`/`DELETE` on the `proxies`, `upstreams`,
+  `consumers`, `plugins/config`, `api-specs`, and `gateway-trust-bundles`
+  resources; the `gateway-trust` status; `GET /backup` and `POST /restore`;
+  `GET /api-specs/by-proxy/{id}`; `GET /proxies/{id}/mcp/tools`; and
+  `GET /audit`. A class can admit an operation Foundry does not call (for
+  example `GET /gateway-trust-bundles/{id}`); the
+  [Admin API coverage](admin-api-coverage.md) table lists each one. Edge also
+  classifies `GET /config/export`, `GET /backend-egress-policy`, and
+  `POST /batch` as namespace-scoped; Foundry uses none of them, so they are not
+  in the ceiling and a scoped session is refused (least privilege). Each
+  allowed route must name one of the session's grants in `X-Ferrum-Namespace`. Consumer credentials take only the methods Edge
   serves: `PUT`, `POST`, and `DELETE` on `/consumers/{id}/credentials/{type}`,
   and `DELETE` on `/consumers/{id}/credentials/{type}/{index}`.
 - **Allowed fleet-wide routes** need no namespace header. They are Edge's

@@ -18,8 +18,10 @@
  * unit test until the table is re-checked against the new spec, and fails
  * this check until every new operation is classified.
  *
- *   node scripts/admin-api-coverage.mjs                 # the pinned Edge
- *   FERRUM_EDGE_REF=main node scripts/admin-api-coverage.mjs
+ *   node scripts/admin-api-coverage.mjs
+ *
+ * The check is pinned-only: the table records one Edge commit, and only that
+ * commit (`edge.source_commit`) is ever checked against it.
  */
 
 import { createHash } from "node:crypto";
@@ -41,6 +43,9 @@ const PATH_KEY_PATTERN = /^ {2}(\/[^\s:]*):\s*$/;
 const ITEM_KEY_PATTERN = /^ {4}([A-Za-z$][A-Za-z0-9_$-]*):/;
 const TOP_LEVEL_PATTERN = /^[^\s#]/;
 const ROW_PATTERN = /^\|\s*`([A-Z]+)`\s*\|\s*`(\/[^`]*)`\s*\|\s*([A-Za-z]+)\s*\|\s*([A-Za-z]+)\s*\|(.*)\|\s*$/;
+const HEADER_PATTERN = /^\|\s*Method\s*\|\s*Path\s*\|\s*Foundry\s*\|\s*Scoped session\s*\|\s*Where or why\s*\|$/;
+const SEPARATOR_PATTERN = /^\|(?:\s*:?-{3,}:?\s*\|){5}$/;
+const HEADING_PATTERN = /^#{1,6}\s/;
 const MARKER_PATTERN = /<!--\s*admin-api-coverage\s+source_commit=([0-9a-f]{40})\s+spec_sha256=([0-9a-f]{64})\s+paths=(\d+)\s+operations=(\d+)\s*-->/;
 const SOURCE_FILE_PATTERN = /`((?:src|server)\/[^`]+\.tsx?)`/;
 
@@ -102,8 +107,25 @@ export function parseCoverageTable(markdown) {
   if (!marker) throw new Error("docs/admin-api-coverage.md has no admin-api-coverage marker");
   const rows = [];
   const seen = new Set();
-  for (const [index, line] of markdown.split("\n").entries()) {
-    if (!line.startsWith("| `")) continue;
+  // Every line Markdown would render as part of a table is accounted for: a
+  // coverage table is its header, its separator, then body rows up to the
+  // next blank line or heading, and every body row must parse. A pipe line
+  // outside a coverage table is refused, so no row GitHub shows can escape
+  // the check through spacing or placement.
+  let state = "outside";
+  for (const [index, raw] of markdown.split("\n").entries()) {
+    const line = raw.trim();
+    if (state === "body" && (line === "" || HEADING_PATTERN.test(line))) state = "outside";
+    if (state === "outside") {
+      if (HEADER_PATTERN.test(line)) state = "separator";
+      else if (line.startsWith("|")) throw new Error(`line ${index + 1}: table row outside a coverage table`);
+      continue;
+    }
+    if (state === "separator") {
+      if (!SEPARATOR_PATTERN.test(line)) throw new Error(`line ${index + 1}: coverage table header without a separator`);
+      state = "body";
+      continue;
+    }
     const row = ROW_PATTERN.exec(line);
     if (!row) throw new Error(`line ${index + 1}: malformed coverage row`);
     const [, method, path, foundry, scoped, note] = row;
@@ -160,8 +182,7 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
-  const pinned = readSupportedPairing().edge.source_commit;
-  const ref = process.env.FERRUM_EDGE_REF?.trim() || pinned;
+  const ref = readSupportedPairing().edge.source_commit;
   const spec = await fetchPinnedSource(OPENAPI_SOURCE, ref);
   const table = parseCoverageTable(readFileSync(COVERAGE_DOC, "utf8"));
   const findings = checkCoverage(spec, table, ref);

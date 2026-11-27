@@ -14,6 +14,7 @@ import {
   useChargebackSinkStatus,
 } from "@/hooks/useOps";
 import { formatDateTime } from "@/lib/format";
+import { isReadDenied, ReadDeniedNotice } from "@/components/shared/ReadState";
 
 interface RefreshPolicy { refetchInterval?: number | false; }
 
@@ -283,8 +284,19 @@ function count(value: number | undefined): string {
 export function chargebackSinkFindings(status: ChargebackSinkStatusResponse): string[] {
   const { totals } = status;
   const findings: string[] = [];
-  if (totals.spool.available === false) findings.push("Spool storage is not writable on every spool-enabled instance");
-  if ((totals.export.failures_total ?? 0) > 0) findings.push(`${count(totals.export.failures_total)} ClickHouse export failures`);
+  // `totals.spool.available` is false whenever no live instance enables a
+  // spool (Edge reports `spool_enabled_any && spool_all_available`), and an
+  // instance's `available` is false whenever its spool is disabled. Only an
+  // enabled spool that is unavailable is a storage fault.
+  const unwritable = status.instances.filter(
+    (instance) => instance.spool.enabled === true && instance.spool.available === false,
+  ).length;
+  if (unwritable > 0) {
+    findings.push(`Spool storage is not writable on ${count(unwritable)} spool-enabled instance${unwritable === 1 ? "" : "s"}`);
+  }
+  // Counts ClickHouse delivery failures and local snapshot spool handoff
+  // failures alike; each instance's last failure reason says which.
+  if ((totals.export.failures_total ?? 0) > 0) findings.push(`${count(totals.export.failures_total)} sink delivery failures`);
   if (totals.per_event.dropped_total > 0) findings.push(`${count(totals.per_event.dropped_total)} charge rows dropped before acknowledgement or spooling`);
   if ((totals.queue.full_drops_total ?? 0) > 0) findings.push(`${count(totals.queue.full_drops_total)} events dropped on a full queue`);
   if ((totals.spool.drops_total ?? 0) > 0) findings.push(`${count(totals.spool.drops_total)} spool drops`);
@@ -302,9 +314,11 @@ export function chargebackSinkFindings(status: ChargebackSinkStatusResponse): st
  * page that `FleetViewGate` withholds from namespace-scoped sessions.
  */
 export function ChargebackSinkPanel({ refetchInterval }: RefreshPolicy = {}) {
-  const { data, isLoading, isError, dataUpdatedAt } = useChargebackSinkStatus(refetchInterval);
+  const { data, error, isLoading, isError, dataUpdatedAt } = useChargebackSinkStatus(refetchInterval);
 
   if (isLoading) return <p className="text-text-muted text-sm">Loading…</p>;
+  // A 403 is an authorization denial, never "unavailable" or an idle sink.
+  if (isError && isReadDenied(error)) return <ReadDeniedNotice label="Chargeback sink status" />;
   if (isError || !data)
     return (
       <>

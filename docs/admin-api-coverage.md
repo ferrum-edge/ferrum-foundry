@@ -33,9 +33,13 @@ used (UI) or listed as Unused.
 it through the BFF's namespace route ceiling (`server/proxy-path.ts`):
 **Allowed** (a namespace-scoped route naming one of the session's grants, or
 one of Edge's `ns`-claim global routes) or **Refused** (`403 Namespace access
-denied`). The ceiling allows only routes Foundry uses, so Edge's
-namespace-scoped `GET /config/export`, `GET /backend-egress-policy` and
-`POST /batch` are refused to a scoped session.
+denied`). The ceiling is an allow-list of route classes (a method set and a
+path pattern, such as `GET`, `PUT` and `DELETE` on any namespace-scoped
+resource item), not of individual operations, so a class Foundry uses can
+admit an operation it does not: `GET /gateway-trust-bundles/{id}` is Unused
+but Allowed. Edge's namespace-scoped `GET /config/export`,
+`GET /backend-egress-policy` and `POST /batch` were removed from the ceiling
+because Foundry uses none of them, and are refused to a scoped session.
 
 Mode-dependent operations (mesh, waypoints, charges, backend capabilities,
 gateway trust, audit, API specs) answer `404`/`503` on gateways without the
@@ -260,7 +264,10 @@ Operators who need it call the Edge admin API directly with their own
   through the transparent proxy; they carry no Foundry compatibility promise.
 - `GET /live`, `GET /status`, `GET /gateway-trust-bundles/{id}`, and `GET`/`PUT`
   of one managed TLS record are ordinary reads or writes Foundry happens not to
-  need. `GET /diagnostics/v1/refs/{ref}` is unused because Foundry has no
+  need. `GET /gateway-trust-bundles/{id}` stays inside the ceiling's resource
+  item class: it reads one bundle of a granted namespace, which the session
+  can already read through the list Foundry uses, so it grants nothing new,
+  and narrowing the class would only split one route pattern for no gain. `GET /diagnostics/v1/refs/{ref}` is unused because Foundry has no
   diagnostic-reference import.
 - `GET /consumers/{id}/verification` and `GET /deployment-snapshot` return
   credential-complete evidence and are denied; see

@@ -119,13 +119,37 @@ describe("chargeback sink delivery status", () => {
     status.instances[0].export.last_failure_reason = "connection refused";
     await mount();
     const text = host.textContent ?? "";
-    expect(text).toContain("4 ClickHouse export failures");
+    expect(text).toContain("4 sink delivery failures");
     expect(text).toContain("2 charge rows dropped");
-    expect(text).toContain("Spool storage is not writable");
+    expect(text).toContain("Spool storage is not writable on 1 spool-enabled instance");
     expect(text).toContain("1 rows dead-lettered");
     expect(text).toContain("unavailable");
     expect(text).toContain("connection refused");
     expect(text).not.toContain("No export failure");
+  });
+
+  it("reports no spool fault when no live instance enables a spool", async () => {
+    // Edge reports `totals.spool.available: false` and an instance's
+    // `available: false` whenever its spool is disabled.
+    status.totals.spool.available = false;
+    status.instances[0].spool = { enabled: false, available: false };
+    await mount();
+    const text = host.textContent ?? "";
+    expect(text).toContain("disabled");
+    expect(text).not.toContain("Spool storage is not writable");
+    expect(text).not.toContain("unavailable");
+    expect(text).toContain("No export failure, drop, dead letter, or unbound spool record");
+    expect(chargebackSinkFindings(status)).toEqual([]);
+  });
+
+  it("reports no spool fault on a gateway with no sink", async () => {
+    status = { ...liveStatus(), enabled: false, instance_count: 0, instances: [] };
+    status.totals.spool = { files: 0, bytes: 0, drops_total: 0, available: false };
+    await mount();
+    const text = host.textContent ?? "";
+    expect(text).toContain("No api_chargeback_sink instance is live on this gateway");
+    expect(text).not.toContain("Spool storage is not writable");
+    expect(chargebackSinkFindings(status)).toEqual([]);
   });
 
   it("states that no instance is live, keeping cumulative loss visible", async () => {
@@ -143,11 +167,22 @@ describe("chargeback sink delivery status", () => {
     expect(chargebackSinkFindings(liveStatus())).toEqual([]);
   });
 
-  it.each([403, 500, "network"] as const)("reports %s as unavailable rather than as an idle sink", async (reason) => {
+  it("reports a 403 as a read denial, not as unavailability or an idle sink", async () => {
+    failure = 403;
+    await mount();
+    const text = host.textContent ?? "";
+    expect(host.querySelector("[data-read-denied]")).not.toBeNull();
+    expect(text).toContain("Chargeback sink status: read not permitted for this session");
+    expect(text).not.toContain("Sink delivery status unavailable");
+    expect(text).not.toContain("No api_chargeback_sink instance is live");
+  });
+
+  it.each([404, 500, 503, "network"] as const)("reports %s as unavailable rather than as a denial or an idle sink", async (reason) => {
     failure = reason;
     await mount();
     const text = host.textContent ?? "";
     expect(text).toContain("Sink delivery status unavailable");
+    expect(host.querySelector("[data-read-denied]")).toBeNull();
     expect(text).not.toContain("No api_chargeback_sink instance is live");
   });
 });
