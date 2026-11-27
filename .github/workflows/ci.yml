@@ -423,10 +423,17 @@ jobs:
         run: |
           set -euo pipefail
           sentinel="foundry-ci-sentinel-${GITHUB_RUN_ID}-${RANDOM}${RANDOM}"
+          # The supported form carries the reference in a header, which no log
+          # records; the path forms are what a mistaken client might still send.
           signed_in="$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --header 'X-Demo-Identity: admin' \
-            "http://127.0.0.1:8088/api/diagnostics/refs/https%3A%2F%2Fuser%3A${sentinel}%40elsewhere.test?token=${sentinel}")"
+            --header "X-Ferrum-Diagnostic-Ref: https://user:${sentinel}@elsewhere.test" \
+            "http://127.0.0.1:8088/api/diagnostics/lookup")"
           test "$signed_in" = 403 || test "$signed_in" = 400
+          legacy="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header 'X-Demo-Identity: admin' \
+            "http://127.0.0.1:8088/api/diagnostics/refs/https%3A%2F%2Fuser%3A${sentinel}%40elsewhere.test?token=${sentinel}")"
+          test "$legacy" = 400
           for target in "/api/diagnostics/refs/${sentinel}" "/%61pi/diagnostics/refs/${sentinel}"; do
             headers="$(curl --silent --output /dev/null --dump-header - "http://127.0.0.1:8088${target}")"
             echo "$headers" | head -1 | grep -q ' 401'

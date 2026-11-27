@@ -71,7 +71,7 @@ export function subscribeGatewayTarget(listener: () => void): () => void {
 export function targetsGateway(url: string): boolean {
   const path = new URL(url, "http://localhost").pathname;
   return path.startsWith("/api/proxy/") || path === "/api/settings" || path.startsWith("/api/settings/")
-    || path.startsWith("/api/diagnostics/refs/");
+    || path === "/api/diagnostics/lookup";
 }
 
 /**

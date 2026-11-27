@@ -4,7 +4,6 @@
 
 import { isHTTPError } from "ky";
 import { api, scoped, SILENT_ERRORS, type NamespaceScope } from "./client";
-import { pathSegment } from "./pathSegment";
 
 /** The reference format Edge stamps in `X-Ferrum-Diagnostic-Ref`. */
 export const DIAGNOSTIC_REF_PATTERN = /^(?:fd1_[0-9a-f]{32}|fd2_[0-9a-f]{8}_[0-9a-f]{32})$/;
@@ -73,7 +72,9 @@ export async function lookupDiagnosticRef(
 ): Promise<DiagnosticLookup> {
   try {
     return await api
-      .get(`api/diagnostics/refs/${pathSegment(ref)}`, scoped(scope, {
+      // In a header, never the URL: a request target is what proxies log.
+      .get("api/diagnostics/lookup", scoped(scope, {
+        headers: { "X-Ferrum-Diagnostic-Ref": ref },
         retry: 0,
         signal,
         context: { [SILENT_ERRORS]: true },

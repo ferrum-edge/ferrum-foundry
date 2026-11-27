@@ -74,13 +74,17 @@ it.runIf(process.env.FERRUM_DIAGNOSTICS_GATEWAY_CONTRACT === 'true')(
 
       // An unlisted role is refused by the BFF before the gateway is asked.
       const admins = await session('admin');
-      const refused = await app.inject({ method: 'GET', url: `/api/diagnostics/refs/${ref}`, headers: admins });
+      const refused = await app.inject({
+        method: 'GET', url: '/api/diagnostics/lookup', headers: { ...admins, 'x-ferrum-diagnostic-ref': ref! },
+      });
       expect(refused.statusCode).toBe(403);
       expect(refused.json().code).toBe('FERRUM_BFF_DIAGNOSTICS_NOT_PERMITTED');
 
       // The listed role resolves it through the gateway's own lookup.
       const operators = await session('operator');
-      const resolved = await app.inject({ method: 'GET', url: `/api/diagnostics/refs/${ref}`, headers: operators });
+      const resolved = await app.inject({
+        method: 'GET', url: '/api/diagnostics/lookup', headers: { ...operators, 'x-ferrum-diagnostic-ref': ref! },
+      });
       expect(resolved.statusCode, resolved.body).toBe(200);
       const lookup = resolved.json();
       expect(lookup).toMatchObject({
@@ -91,7 +95,9 @@ it.runIf(process.env.FERRUM_DIAGNOSTICS_GATEWAY_CONTRACT === 'true')(
 
       // A reference the gateway does not hold is a miss, not an error.
       const unknown = `fd1_${'0'.repeat(32)}`;
-      const missed = await app.inject({ method: 'GET', url: `/api/diagnostics/refs/${unknown}`, headers: operators });
+      const missed = await app.inject({
+        method: 'GET', url: '/api/diagnostics/lookup', headers: { ...operators, 'x-ferrum-diagnostic-ref': unknown },
+      });
       expect(missed.statusCode).toBe(404);
       expect(missed.json().code).toBe('FERRUM_BFF_DIAGNOSTIC_NOT_FOUND');
 

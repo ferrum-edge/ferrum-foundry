@@ -50,7 +50,7 @@ beforeEach(() => {
     requests.push(request);
     const path = new URL(request.url).pathname;
     if (path === "/api/diagnostics/config") return Response.json({ lookupPermitted: permitted });
-    if (path.startsWith("/api/diagnostics/refs/")) return answer();
+    if (path === "/api/diagnostics/lookup") return answer();
     throw new Error(`Unexpected request: ${path}`);
   });
 });
@@ -61,7 +61,7 @@ afterEach(async () => {
 });
 
 function lookups() {
-  return requests.filter((request) => new URL(request.url).pathname.startsWith("/api/diagnostics/refs/"));
+  return requests.filter((request) => new URL(request.url).pathname === "/api/diagnostics/lookup");
 }
 
 async function submit(value: string) {
@@ -105,8 +105,11 @@ describe("diagnostic reference lookup", () => {
     await submit(`  ${REF}  `);
     await settle(() => expect(ui.host.textContent).toContain("orders-api"));
     expect(lookups()).toHaveLength(1);
-    expect(new URL(lookups()[0].url).pathname).toBe(`/api/diagnostics/refs/${REF}`);
+    // The reference travels in a header, never in the request target.
+    expect(new URL(lookups()[0].url).pathname).toBe("/api/diagnostics/lookup");
     expect(new URL(lookups()[0].url).search).toBe("");
+    expect(lookups()[0].headers.get("X-Ferrum-Diagnostic-Ref")).toBe(REF);
+    expect(lookups()[0].url).not.toContain(REF);
     expect(lookups()[0].headers.get("X-Ferrum-Namespace")).toBe("tenant-a");
     const text = ui.host.textContent ?? "";
     expect(text).toContain("connection_failure");

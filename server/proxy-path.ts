@@ -56,7 +56,7 @@ const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
 //   (`namespace-registry.ts`).
 // - Edge's `GET /diagnostics/v1/refs/{ref}` stays denied here: Foundry
 //   resolves references only through its dedicated
-//   `/api/diagnostics/refs/*` route (`routes/diagnostics.ts`), which signs a
+//   `GET /api/diagnostics/lookup` route (`routes/diagnostics.ts`), which signs a
 //   per-lookup, namespace-bound token with the `diagnostics:read` scope.
 // - Everything else is fleet-global and refused: TLS inventory, material, ACME,
 //   rotation and validation; `/cluster`; `/config/apply-status`; `/metrics*`

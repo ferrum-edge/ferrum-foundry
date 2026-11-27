@@ -69,8 +69,10 @@ Status page's Diagnostic reference lookup card) resolves an Edge
 deployment's `FERRUM_ADMIN_URL`, within this decision:
 
 - The browser sends one reference matching `fd1_<32 hex>` or
-  `fd2_<8 hex>_<32 hex>` and its tab's `X-Ferrum-Namespace`; a query string,
-  an escaped reference or any other shape is refused before anything is sent.
+  `fd2_<8 hex>_<32 hex>` in the `X-Ferrum-Diagnostic-Ref` header of
+  `GET /api/diagnostics/lookup`, never in the URL, and its tab's
+  `X-Ferrum-Namespace`; a query string, an escaped reference or any other
+  shape is refused before anything is sent.
 - Edge requires the `diagnostics:read` scope and an `ns` claim. No role
   implies the scope. Only roles listed in `FERRUM_DIAGNOSTICS_ROLES` (empty by
   default) receive it, on a token minted for that one lookup (at most 60

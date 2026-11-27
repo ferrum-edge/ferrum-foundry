@@ -149,7 +149,7 @@ update the marker. A new Edge route is refused to scoped sessions until
 | `GET` | `/backend-egress-policy` | Unused | Refused | Not read; the Cluster page shows the per-data-plane reports from `GET /cluster`. Withheld from scoped sessions (least privilege). |
 | `GET` | `/backend-capabilities` | UI | Refused | `src/api/ops.ts` (Cluster page). Fleet-global. |
 | `POST` | `/backend-capabilities/refresh` | UI | Refused | `src/api/ops.ts` (Cluster page, operator). Fleet-global. |
-| `GET` | `/diagnostics/v1/refs/{ref}` | UI | Refused | `server/routes/diagnostics.ts` (Status page, Diagnostic reference lookup), through the dedicated `/api/diagnostics/refs/:ref` route, which signs a per-lookup token with `diagnostics:read` and the tab's namespace for a role in `FERRUM_DIAGNOSTICS_ROLES`. The generic `/api/proxy` path still refuses it to scoped sessions, and Edge refuses its tokens, which never carry the scope. |
+| `GET` | `/diagnostics/v1/refs/{ref}` | UI | Refused | `server/routes/diagnostics.ts` (Status page, Diagnostic reference lookup), through the dedicated `GET /api/diagnostics/lookup` route (reference in the `X-Ferrum-Diagnostic-Ref` header), which signs a per-lookup token with `diagnostics:read` and the tab's namespace for a role in `FERRUM_DIAGNOSTICS_ROLES`. The generic `/api/proxy` path still refuses it to scoped sessions, and Edge refuses its tokens, which never carry the scope. |
 
 ### Mesh
 

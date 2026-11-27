@@ -350,8 +350,12 @@ audits it. See [Admin API coverage](admin-api-coverage.md).
 
 ### Diagnostic reference lookup
 
-`GET /api/diagnostics/refs/{ref}` resolves an Edge `X-Ferrum-Diagnostic-Ref`
-(`fd1_…` or `fd2_…`) for the Status page's lookup card. Edge requires the
+`GET /api/diagnostics/lookup` resolves an Edge `X-Ferrum-Diagnostic-Ref`
+(`fd1_…` or `fd2_…`), sent in a request header of the same name, for the
+Status page's lookup card. The reference is never part of the request target,
+so neither the BFF's log, a reverse proxy's access log, nor an nginx error
+line (which quotes the request line) can record it. The earlier path form
+`/api/diagnostics/refs/…` is refused with a fixed `400`. Edge requires the
 `diagnostics:read` scope and an `ns` claim, and never implies the scope from a
 role. Foundry grants it only to the roles listed in `FERRUM_DIAGNOSTICS_ROLES`,
 which is empty by default, so no session may look references up until the

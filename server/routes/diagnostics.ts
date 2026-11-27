@@ -7,15 +7,18 @@
  * `GET /diagnostics/v1/refs/{ref}` on the configured gateway, within the
  * boundary ADR 0001 sets for diagnostic presentation:
  *
- * - The browser sends one typed reference and its tab's namespace binding,
- *   never a URL, path, query or credential. The target is the deployment's
+ * - The browser sends one typed reference, in the `X-Ferrum-Diagnostic-Ref`
+ *   request header of `GET /api/diagnostics/lookup`, and its tab's namespace
+ *   binding; never a URL, path, query or credential. The reference stays out
+ *   of the request target, so no access or error log on the way (the BFF's,
+ *   a reverse proxy's) records it. The target is the deployment's
  *   `FERRUM_ADMIN_URL`.
  * - Edge requires the `diagnostics:read` scope, which no role implies. Only a
  *   role listed in `FERRUM_DIAGNOSTICS_ROLES` (empty by default) receives it,
  *   on a short-lived token minted for this one lookup and bound to the one
  *   namespace the session is authorized for. The UI hides the lookup from
  *   other roles; this route refuses them regardless.
- * - Budgets: at most 4 KiB of request target, one namespace, 64 KiB of
+ * - Budgets: at most 4 KiB of reference header, one namespace, 64 KiB of
  *   response read before parsing, eight levels of nesting, a five-second
  *   absolute deadline, and bounded concurrency per principal and overall.
  * - The answer is a reviewed projection with bounded strings; failures are
@@ -36,7 +39,10 @@ export const DIAGNOSTICS_SCOPE = 'diagnostics:read';
 export const DIAGNOSTIC_REF_PATTERN = /^(?:fd1_[0-9a-f]{32}|fd2_[0-9a-f]{8}_[0-9a-f]{32})$/;
 const REPLICA_ID_PATTERN = /^[0-9a-f]{8}$/;
 const SCHEMA_VERSION = 'ferrum.diagnostic_ref.v1';
-const LOOKUP_PREFIX = '/api/diagnostics/refs/';
+export const LOOKUP_PATH = '/api/diagnostics/lookup';
+export const DIAGNOSTIC_REF_HEADER = 'x-ferrum-diagnostic-ref';
+/** The earlier path form; answered with a fixed refusal, never routed. */
+const LEGACY_PREFIX = '/api/diagnostics/refs/';
 const ABSOLUTE_URL_ORIGIN_PATTERN = /^https?:\/\/[^/]+/;
 const ASCII_PERCENT_ESCAPE_PATTERN = /%([0-7][0-9a-f])/gi;
 const PORT_PATTERN = /^\d{1,5}$/;
@@ -44,7 +50,7 @@ const EXPLICIT_PORT_PATTERN = /:(\d{1,5})$/;
 const AUTHORITY_END_PATTERN = /[/?#]/;
 
 export const DIAGNOSTIC_LIMITS = {
-  /** Serialized request target, path and any query, in bytes. */
+  /** The reference header, in bytes. */
   maxRequestBytes: 4 * 1024,
   /** Upstream response bytes read before parsing. */
   maxResponseBytes: 64 * 1024,
@@ -78,7 +84,7 @@ const FAILURES: Record<FailureCode, { status: number; error: string }> = {
   },
   FERRUM_BFF_DIAGNOSTIC_REF_INVALID: {
     status: 400,
-    error: 'Not a diagnostic reference: expected fd1_<32 hex> or fd2_<8 hex>_<32 hex>, with no query',
+    error: 'Send one X-Ferrum-Diagnostic-Ref header: fd1_<32 hex> or fd2_<8 hex>_<32 hex>, and no query',
   },
   FERRUM_BFF_DIAGNOSTIC_NAMESPACE: {
     status: 403,
@@ -389,10 +395,12 @@ const diagnosticsPlugin: FastifyPluginAsync = async (fastify) => {
     return fail(reply, 'FERRUM_BFF_DIAGNOSTICS_UNAVAILABLE');
   });
 
-  // A wildcard, not `:ref`, so an overlong or malformed segment still reaches
-  // this handler's fixed refusal instead of the router's echoing 404.
+  // The earlier path form put the reference in the request target, where a
+  // proxy logs it. It is refused with a fixed body, never routed or echoed.
+  fastify.get(`${LEGACY_PREFIX}*`, async (_request, reply) => fail(reply, 'FERRUM_BFF_DIAGNOSTIC_REF_INVALID'));
+
   fastify.get(
-    `${LOOKUP_PREFIX}*`,
+    LOOKUP_PATH,
     { onRequest: requireAdminAuth },
     async (request, reply) => {
       const config = loadConfig();
@@ -402,8 +410,13 @@ const diagnosticsPlugin: FastifyPluginAsync = async (fastify) => {
       if (!diagnosticsPermitted(config, principal)) return fail(reply, 'FERRUM_BFF_DIAGNOSTICS_NOT_PERMITTED');
 
       const target = request.raw.url ?? request.url;
-      const ref = target.startsWith(LOOKUP_PREFIX) ? target.slice(LOOKUP_PREFIX.length) : '';
-      if (Buffer.byteLength(target) > DIAGNOSTIC_LIMITS.maxRequestBytes || !DIAGNOSTIC_REF_PATTERN.test(ref)) {
+      const supplied = request.headers[DIAGNOSTIC_REF_HEADER];
+      const ref = typeof supplied === 'string' ? supplied : '';
+      if (
+        target !== LOOKUP_PATH ||
+        Buffer.byteLength(ref) > DIAGNOSTIC_LIMITS.maxRequestBytes ||
+        !DIAGNOSTIC_REF_PATTERN.test(ref)
+      ) {
         return fail(reply, 'FERRUM_BFF_DIAGNOSTIC_REF_INVALID');
       }
       // Bound to the gateway the page was loaded against: a lookup issued

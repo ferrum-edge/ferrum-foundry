@@ -91,8 +91,16 @@ async function setup(env: Record<string, string> = {}) {
   return app;
 }
 
-function lookUp(server: FastifyInstance, url = `/api/diagnostics/refs/${REF}`, extra: Record<string, string> = {}) {
-  return server.inject({ method: "GET", url, headers: { ...headers, ...extra } });
+function lookUp(
+  server: FastifyInstance,
+  ref: string | null = REF,
+  extra: Record<string, string> = {},
+  url = "/api/diagnostics/lookup",
+) {
+  return server.inject({
+    method: "GET", url,
+    headers: { ...headers, ...(ref === null ? {} : { "x-ferrum-diagnostic-ref": ref }), ...extra },
+  });
 }
 
 describe("diagnostic lookup permission", () => {
@@ -116,7 +124,9 @@ describe("diagnostic lookup permission", () => {
 
   it("requires authentication", async () => {
     const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
-    const response = await server.inject({ method: "GET", url: `/api/diagnostics/refs/${REF}` });
+    const response = await server.inject({
+      method: "GET", url: "/api/diagnostics/lookup", headers: { "x-ferrum-diagnostic-ref": REF },
+    });
     expect(response.statusCode).toBe(401);
     expect(upstream).not.toHaveBeenCalled();
   });
@@ -164,14 +174,16 @@ describe("diagnostic lookup for a listed role", () => {
   });
 
   it.each([
-    ["an uppercase reference", `/api/diagnostics/refs/${REF.toUpperCase()}`],
-    ["a short reference", "/api/diagnostics/refs/fd1_00"],
-    ["a query", `/api/diagnostics/refs/${REF}?target=https://elsewhere.test`],
-    ["an encoded reference", `/api/diagnostics/refs/${REF.replace("fd1_", "fd1%5F")}`],
-    ["a replica reference without its id", `/api/diagnostics/refs/fd2_${"0".repeat(32)}`],
-  ])("refuses %s before contacting the gateway", async (_label, url) => {
+    ["an uppercase reference", REF.toUpperCase(), undefined],
+    ["a short reference", "fd1_00", undefined],
+    ["a query", REF, "/api/diagnostics/lookup?target=https://elsewhere.test"],
+    ["an encoded reference", REF.replace("fd1_", "fd1%5F"), undefined],
+    ["a replica reference without its id", `fd2_${"0".repeat(32)}`, undefined],
+    ["no reference header", null, undefined],
+    ["the earlier path form", null, `/api/diagnostics/refs/${REF}`],
+  ] as const)("refuses %s before contacting the gateway", async (_label, ref, url) => {
     const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
-    const response = await lookUp(server, url);
+    const response = await lookUp(server, ref, {}, url);
     expect(response.statusCode).toBe(400);
     expect(response.json().code).toBe("FERRUM_BFF_DIAGNOSTIC_REF_INVALID");
     expect(upstream).not.toHaveBeenCalled();
@@ -181,7 +193,7 @@ describe("diagnostic lookup for a listed role", () => {
     const tagged = `fd2_0a1b2c3d_${"e".repeat(32)}`;
     upstream.mockImplementation(async () => Response.json({ ...lookup, ref: tagged, replica_id: "0a1b2c3d" }));
     const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
-    const response = await lookUp(server, `/api/diagnostics/refs/${tagged}`);
+    const response = await lookUp(server, tagged);
     expect(response.statusCode).toBe(200);
     expect(response.json().replica_id).toBe("0a1b2c3d");
   });
@@ -316,7 +328,8 @@ describe("diagnostic lookup for a listed role", () => {
       // Two real connections fill the principal's share, then both leave.
       const clients = [0, 1].map(() => {
         const request = httpRequest({
-          host: "127.0.0.1", port, path: `/api/diagnostics/refs/${REF}`, headers,
+          host: "127.0.0.1", port, path: "/api/diagnostics/lookup",
+          headers: { ...headers, "x-ferrum-diagnostic-ref": REF },
         });
         request.on("error", () => undefined);
         request.end();
@@ -372,13 +385,15 @@ describe("diagnostic lookup for a listed role", () => {
   it("answers an overlong or malformed target with a fixed body that echoes nothing", async () => {
     const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
     const secret = "https://user:hunter2-secret@elsewhere.test/";
-    for (const url of [
-      `/api/diagnostics/refs/${encodeURIComponent(secret)}`,
-      `/api/diagnostics/refs/${"f".repeat(5000)}`,
-      `/api/diagnostics/refs/${REF}/extra`,
-    ]) {
-      const response = await lookUp(server, url);
-      expect(response.statusCode, url.slice(0, 60)).toBe(400);
+    for (const [ref, url] of [
+      [secret, undefined],
+      ["f".repeat(5000), undefined],
+      [null, `/api/diagnostics/refs/${encodeURIComponent(secret)}`],
+      [null, `/api/diagnostics/refs/${"f".repeat(5000)}`],
+      [null, `/api/diagnostics/refs/${REF}/extra`],
+    ] as const) {
+      const response = await lookUp(server, ref, {}, url);
+      expect(response.statusCode, String(url ?? ref).slice(0, 60)).toBe(400);
       expect(response.json().code).toBe("FERRUM_BFF_DIAGNOSTIC_REF_INVALID");
       expect(response.body).not.toContain("hunter2");
       expect(response.body).not.toContain("ffffffffff");
