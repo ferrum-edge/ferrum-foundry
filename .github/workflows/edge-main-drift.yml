@@ -206,6 +206,7 @@ jobs:
           docker run --detach --name ferrum-edge-contract \
             --publish 127.0.0.1:9000:9000 \
             --publish 127.0.0.1:8000:8000 \
+            --publish 127.0.0.1:18901:18901 \
             --add-host host.docker.internal:host-gateway \
             --env FERRUM_MODE=database \
             --env FERRUM_NAMESPACE=ferrum-foundry-demo \

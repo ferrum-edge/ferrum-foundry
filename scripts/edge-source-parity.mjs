@@ -56,7 +56,11 @@ const META_ENTRY_PATTERN =
 const META_OPENING_PATTERN = /BuiltinPluginParityMeta\s*\{/g;
 const STRING_LIST_PATTERN = /^\[\s*((?:"[^"\\]*"\s*,\s*)*"[^"\\]*"\s*,?)\s*\]$/;
 const STRING_ITEM_PATTERN = /"([^"\\]*)"/g;
-const MATCHES_MODE_PATTERN = /matches!\(\s*\*mode\s*,\s*((?:"[^"\\]+"\s*\|\s*)*"[^"\\]+")\s*\)/g;
+const MATCHES_MODE_PATTERN = /matches!\(\s*\*mode\s*,/g;
+// The one shape the parser reads: the positive mode list as the condition of
+// the branch that assigns the proxy-serving fixture.
+const SERVING_BRANCH_PATTERN =
+  /\bif\s+matches!\(\s*\*mode\s*,\s*((?:"[^"\\]+"\s*\|\s*)*"[^"\\]+")\s*\)\s*\{\s*base\s*=\s*proxy_serving_fixture\(\s*mode\s*\)\s*;\s*\}/g;
 
 const RAW_STRING_PATTERN = /^b?r(#*)"/;
 const CHAR_LITERAL_PATTERN = /^'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|.)|[^\\'\n])'/u;
@@ -235,10 +239,17 @@ export function parseMetricsModes(metricsSource) {
   if (code[open] !== "[") throw new Error("`ADMIN_METRICS_MODES` is not a list literal");
   const modes = stringList(code.slice(open, closingIndex(code, open, "[", "]")), "ADMIN_METRICS_MODES");
   const fixtures = rustFunction(code, "contract_fixtures");
-  const serving = [...fixtures.matchAll(MATCHES_MODE_PATTERN)];
+  const lists = [...fixtures.matchAll(MATCHES_MODE_PATTERN)].length;
+  if (lists !== 1) {
+    throw new Error(
+      `\`contract_fixtures\` has ${lists} \`matches!(*mode, …)\` mode lists; expected exactly one`,
+    );
+  }
+  const serving = [...fixtures.matchAll(SERVING_BRANCH_PATTERN)];
   if (serving.length !== 1) {
     throw new Error(
-      `\`contract_fixtures\` has ${serving.length} \`matches!(*mode, …)\` mode lists; expected exactly one`,
+      "`contract_fixtures` no longer selects `proxy_serving_fixture(mode)` with " +
+        "`if matches!(*mode, …) { base = proxy_serving_fixture(mode); }`",
     );
   }
   const servingModes = [...serving[0][1].matchAll(STRING_ITEM_PATTERN)].map(([, mode]) => mode);

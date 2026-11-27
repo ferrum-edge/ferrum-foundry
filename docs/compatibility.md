@@ -791,17 +791,26 @@ workflow:
 | Foundry table | Edge source | What a stale copy breaks |
 | --- | --- | --- |
 | `PLUGIN_DEFAULT_PRIORITY` (`src/lib/pluginChainOrder.ts`) | `BUILTIN_PLUGIN_PARITY_META` in `src/plugins/builtin_parity.rs` | Effective policy orders each proxy's chain by it, which decides whether a Consumer is authenticated before another plugin can refuse it |
-| `EDGE_NAMESPACE_SCOPED_KINDS` and the allowlist digest (`server/proxy-path.ts`) | `namespace_scoped_resource_kind`, `ceiling_global_route_is_allowed` and `ns_claim_global_route_is_allowed` in `src/admin/mod.rs` | The BFF's namespace route ceiling: a scoped request reaches Edge only on a route class Edge treats as namespace-scoped |
-| `METRICS_MODES` and `NO_PROXY_STATE_MODES` (`src/lib/adminMetricsReporting.ts`) | `ADMIN_METRICS_MODES` and the proxy-serving modes of `contract_fixtures` in `src/admin/metrics.rs` | Which `/admin/metrics` values the Metrics page and Dashboard hide as placeholders |
+| `EDGE_NAMESPACE_SCOPED_KINDS` and the route digest (`server/proxy-path.ts`) | `namespace_scoped_resource_kind` (its arms, and the whole function by digest), `is_namespace_scoped_route`, `ceiling_global_route_is_allowed` and `ns_claim_global_route_is_allowed` in `src/admin/mod.rs` | The BFF's namespace route ceiling: a scoped request reaches Edge only on a route class Edge treats as namespace-scoped |
+| `METRICS_MODES` and `NO_PROXY_STATE_MODES` (`src/lib/adminMetricsReporting.ts`) | `ADMIN_METRICS_MODES` and the positive mode list of the `contract_fixtures` branch that assigns `proxy_serving_fixture` in `src/admin/metrics.rs` | Which `/admin/metrics` values the Metrics page and Dashboard hide as placeholders |
 
-The parsers fail closed on a shape they do not understand. The allowlists are
-compared by digest (comments removed, whitespace collapsed), so any change to
-them means re-reading them. Behaviour is checked as well:
+The parsers fail closed on a shape they do not understand. The route
+functions are compared by digest (comments removed, whitespace collapsed), so
+any change to them, an early return around unchanged match arms included,
+means re-reading them. Behaviour is checked as well:
 `src/api/effectivePolicy.gateway.test.ts` (Pinned Gateway Contract step
 "Verify effective policy against the gateway") compares `analyzeProxyPolicy`
 with the data plane for a fixture of global, proxy-scoped and proxy-group
 `key_auth` and `access_control` plugins, including a shadowed global
-`key_auth` and an ACL whose only allow-list is `allowed_external_identities`.
+`key_auth` and an ACL whose only allow-list is `allowed_external_identities`;
+an authenticator pair (a `key_auth` on `Authorization` that runs before a
+`jwt_auth`) in `single` and in `multi` auth mode, where a JWT-only Consumer is
+refused in the first and admitted in the second; and a TCP stream proxy, where
+HTTP-only authentication is not counted and the global ACL closes every
+connection. Multi-instance authentication on a TLS stream listener (two
+`mtls_auth` hooks that must both accept a certificate) is modelled as
+request-dependent and unit-tested; the contract gateway has no frontend TLS
+for a client-certificate fixture.
 
 ## Changing the pairing
 
@@ -903,10 +912,12 @@ replace the managed TLS re-read guard in `replaceManagedRecord`
 (`src/api/tls.ts`) with the atomic precondition Edge provides for managed
 records.
 
-**The ferrum-contracts re-pin.** Add a parity test of `PLUGIN_SENSITIVITY`
-(`src/api/pluginSensitivity.ts`) against the contracts
-`plugin-config-sensitivity` vocabulary (ferrum-contracts#96) next to the
-existing Edge-source drift check.
+**The ferrum-contracts re-pin.** Add a parity test of both exports of
+`src/api/pluginSensitivity.ts` against the contracts
+`plugin-config-sensitivity` vocabulary (ferrum-contracts#96): `PLUGIN_SENSITIVITY`
+against its per-plugin rule table, and `KAFKA_SAFE_PRODUCER_PROPERTIES` (which
+decides the producer property values left readable) against its Kafka safe
+property list. Keep the existing Edge-source drift check beside it.
 
 **The Foundry 1.0.0 release.** The release pull request records the
 envelope the Gateway Modes and Critical Journeys engine jobs qualify (the

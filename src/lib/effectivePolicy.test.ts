@@ -1017,4 +1017,31 @@ describe("chain order and authentication mode (Ferrum Edge v0.9.21)", () => {
     expect(multi.consumers.map((entry) => entry.decision)).toEqual(["allowed", "allowed"]);
     expect(multi.conditional).toBe(false);
   });
+
+  it("runs every authentication hook on a stream proxy, whatever the auth mode", () => {
+    const erin = consumer("5", "erin", [], { mtls_auth: [{ identity: "erin.example" }] });
+    const stream = (auth_mode: Proxy["auth_mode"], attached: string[]) => proxy({
+      id: "tcp-1",
+      backend_scheme: "tcps",
+      listen_port: 18_443,
+      listen_path: null,
+      auth_mode,
+      plugins: attached.map((plugin_config_id) => ({ plugin_config_id })),
+    });
+    const plugins = [
+      plugin("m1", "mtls_auth", "proxy", {}, { proxy_id: "tcp-1" }),
+      plugin("m2", "mtls_auth", "proxy", { required_subject_ou: "payments" }, { proxy_id: "tcp-1" }),
+    ];
+    for (const mode of ["single", "multi"] as const) {
+      // Two hooks: each must accept the certificate, which the stored
+      // credential cannot show, so neither mode's HTTP short-circuit applies.
+      const both = analyzeProxyPolicy(stream(mode, ["m1", "m2"]), plugins, [erin]);
+      expect(both.consumers[0]?.decision, mode).toBe("conditional");
+      expect(both.consumers[0]?.reasons.join(" ")).toContain("On a stream proxy");
+      expect(both.conditional, mode).toBe(true);
+      // One hook: the stored mTLS credential settles it.
+      const one = analyzeProxyPolicy(stream(mode, ["m1"]), plugins, [erin]);
+      expect(one.consumers[0]?.decision, mode).toBe("allowed");
+    }
+  });
 });

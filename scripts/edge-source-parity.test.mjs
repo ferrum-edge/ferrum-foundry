@@ -28,6 +28,8 @@ const UNREADABLE_PATTERN = /^unreadable: /;
 const ARM_PATTERN = /has an arm the parser does not understand/;
 const ENTRY_COUNT_PATTERN = /read 1 of 2 BUILTIN_PLUGIN_PARITY_META entries/;
 const MODE_LISTS_PATTERN = /2 `matches!\(\*mode, …\)` mode lists/;
+const SERVING_BRANCH_PATTERN = /no longer selects `proxy_serving_fixture\(mode\)`/;
+const ROUTE_DIGEST_PATTERN = /namespace_scoped_resource_kind \/ is_namespace_scoped_route \/ .* changed/;
 
 /** Shaped like Edge's `src/plugins/builtin_parity.rs`. */
 const PARITY = `
@@ -69,6 +71,10 @@ fn namespace_scoped_resource_kind(segments: &[&str]) -> Option<&'static str> {
     Some(kind)
 }
 
+fn is_namespace_scoped_route(segments: &[&str]) -> bool {
+    namespace_scoped_resource_kind(segments).is_some()
+}
+
 fn ceiling_global_route_is_allowed(method: &Method, segments: &[&str]) -> bool {
     (*method == Method::GET && matches!(segments, ["plugins"]))
 }
@@ -87,7 +93,12 @@ const KINDS = [
   { segment: "config", guard: 'segments.get(1)==Some(&"export")', kind: "config-export", exposed: false },
   { segment: "plugins", guard: "segments.len()>1", kind: "plugins", exposed: true },
 ];
-const FUNCTIONS = ["ceiling_global_route_is_allowed", "ns_claim_global_route_is_allowed"];
+const FUNCTIONS = [
+  "namespace_scoped_resource_kind",
+  "is_namespace_scoped_route",
+  "ceiling_global_route_is_allowed",
+  "ns_claim_global_route_is_allowed",
+];
 
 /** Shaped like Edge's `src/admin/metrics.rs`. */
 const METRICS = `
@@ -183,6 +194,35 @@ describe("Edge source parity parsers", () => {
     const result = edgeSourceParity({ parity: PARITY, admin: widened, metrics: METRICS }, foundryFor());
     assert.equal(result.namespaceRoutes.length, 1);
     assert.match(result.namespaceRoutes[0], /ceiling_global_route_is_allowed \/ ns_claim_global_route_is_allowed changed/);
+  });
+
+  it("fails on a change around the match even when every arm is unchanged", () => {
+    // An early return makes /gateway-trust/status fleet-global while the arms
+    // still read the same (#760 review F3).
+    const earlyReturn = ADMIN.replace(
+      "    let kind = match *segments.first()? {",
+      '    if segments == ["proxies", "status"] {\n        return None;\n    }\n    let kind = match *segments.first()? {',
+    );
+    assert.notEqual(earlyReturn, ADMIN);
+    assert.deepEqual(compareKinds(parseNamespaceScopedKinds(earlyReturn), KINDS), []);
+    const result = edgeSourceParity({ parity: PARITY, admin: earlyReturn, metrics: METRICS }, foundryFor());
+    assert.equal(result.namespaceRoutes.length, 1);
+    assert.match(result.namespaceRoutes[0], ROUTE_DIGEST_PATTERN);
+    // A changed result, the arms again intact.
+    const wrapped = ADMIN.replace("    Some(kind)\n}", '    Some(kind).filter(|kind| *kind != "proxies")\n}');
+    assert.notEqual(wrapped, ADMIN);
+    const changed = edgeSourceParity({ parity: PARITY, admin: wrapped, metrics: METRICS }, foundryFor());
+    assert.match(changed.namespaceRoutes[0], ROUTE_DIGEST_PATTERN);
+  });
+
+  it("refuses a metrics fixture predicate it does not read as the positive serving branch", () => {
+    const negated = METRICS.replace("if matches!(*mode,", "if !matches!(*mode,");
+    assert.notEqual(negated, METRICS);
+    assert.throws(() => parseMetricsModes(negated), SERVING_BRANCH_PATTERN);
+    const otherBranch = METRICS.replace("base = proxy_serving_fixture(mode);", "base.gateway.uptime_seconds = 1;");
+    assert.throws(() => parseMetricsModes(otherBranch), SERVING_BRANCH_PATTERN);
+    const result = edgeSourceParity({ parity: PARITY, admin: ADMIN, metrics: negated }, foundryFor());
+    assert.match(result.metricsModes[0], UNREADABLE_PATTERN);
   });
 
   it("derives the placeholder modes and reports a mode either side lacks", () => {

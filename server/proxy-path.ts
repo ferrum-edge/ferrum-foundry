@@ -48,9 +48,11 @@ export const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> =
  * `npm run check:edge-source-parity` (`scripts/edge-source-parity.mjs`) re-reads
  * `path` at `edge.source_commit` in the Pinned Gateway Contract job, and at
  * Edge `main` in the Edge Main Drift workflow, and fails when Edge's match
- * arms differ from the table, when the bodies of
- * `ceiling_global_route_is_allowed` and `ns_claim_global_route_is_allowed`
- * no longer hash to `allowlistDigest` (comments removed, whitespace collapsed),
+ * arms differ from the table, when the complete
+ * `namespace_scoped_resource_kind` and `is_namespace_scoped_route` and the
+ * bodies of `ceiling_global_route_is_allowed` and
+ * `ns_claim_global_route_is_allowed` no longer hash to `allowlistDigest`
+ * (comments removed, whitespace collapsed),
  * or when `commit` is not the checked commit.
  */
 export const EDGE_NAMESPACE_ROUTE_SOURCE = {
@@ -58,8 +60,15 @@ export const EDGE_NAMESPACE_ROUTE_SOURCE = {
   path: 'src/admin/mod.rs',
   release: 'v0.9.21',
   commit: 'f9915358c8032214f4034a17c28cdf72d14006c3',
-  allowlistFunctions: ['ceiling_global_route_is_allowed', 'ns_claim_global_route_is_allowed'],
-  allowlistDigest: 'd9dcbb9c50b2698897a9cd8b27c6b5a8357054f08e5e885576671d1de75eebf0',
+  // The classifier whole (not only its match arms, so an early return or a
+  // changed result fails too), its wrapper, and the two `ns`-claim allowlists.
+  allowlistFunctions: [
+    'namespace_scoped_resource_kind',
+    'is_namespace_scoped_route',
+    'ceiling_global_route_is_allowed',
+    'ns_claim_global_route_is_allowed',
+  ],
+  allowlistDigest: '3ace92f83d7a9ba34b4936a7b264ed2750e309b4b37b04080b93225356a3abb2',
 } as const;
 
 /** Each match guard Edge uses, as Rust text without whitespace, and what it tests. */

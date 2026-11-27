@@ -6,7 +6,7 @@ import type {
 } from "@/api/types";
 import { PLUGIN_METADATA } from "@/lib/pluginConfigDefaults";
 import { compareUtf8, comparePluginChainOrder } from "@/lib/pluginChainOrder";
-import { pluginAppliesToProxy } from "@/lib/pluginProtocols";
+import { isStreamProxy, pluginAppliesToProxy } from "@/lib/pluginProtocols";
 
 const LOCAL_AUTH_CREDENTIALS: Readonly<Record<string, BuiltInCredentialType>> = {
   key_auth: "keyauth",
@@ -433,11 +433,34 @@ function singleModeOrderReason(
   authPlugins: EffectivePlugin[],
   firstPluginMatches = false,
 ): string | undefined {
+  if (isStreamProxy(proxy)) return streamAuthReason(authPlugins);
   if (proxy.auth_mode === "multi" || authPlugins.length < 2 || firstPluginMatches) return undefined;
   return (
     `In single auth mode the first rejecting authentication plugin ends the request; ` +
     `they run in the order ${authPlugins.map((plugin) => plugin.plugin_name).join(", ")}, ` +
     "so a credential an earlier plugin rejects never reaches a later one"
+  );
+}
+
+/**
+ * Why a stream proxy's outcome for a Consumer is request-dependent, or
+ * `undefined` when it is not.
+ *
+ * A TCP/UDP/DTLS listener does not run the HTTP authentication phase, so
+ * `auth_mode` plays no part there. Ferrum Edge v0.9.21
+ * `run_tcp_stream_connect_plugins` (`src/proxy/tcp_proxy.rs`) runs every
+ * plugin's `on_stream_connect` in chain order and closes the connection at the
+ * first rejection; `mtls_auth`'s hook verifies the client certificate in
+ * every instance, even after an earlier one identified the Consumer. With
+ * more than one authentication plugin, each must accept the same
+ * certificate, which the stored credential cannot establish.
+ */
+function streamAuthReason(authPlugins: EffectivePlugin[]): string | undefined {
+  if (authPlugins.length < 2) return undefined;
+  return (
+    "On a stream proxy every authentication plugin's connection hook runs, in either auth mode, " +
+    `and the first rejection closes the connection (${authPlugins.map((plugin) => plugin.plugin_name).join(", ")}); ` +
+    "whether each accepts this Consumer's certificate depends on the connection"
   );
 }
 
