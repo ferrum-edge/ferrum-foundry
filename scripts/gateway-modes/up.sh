@@ -159,6 +159,7 @@ YAML
       --volume "$dir/state:/var/lib/ferrum-modes" \
       --env FERRUM_ADMIN_AUDIT_FALLBACK_PATH=/var/lib/ferrum-modes/audit \
       --env FERRUM_ADMIN_AUDIT_SPOOL_DIR=/var/lib/ferrum-modes/audit-spool \
+      --env FERRUM_TLS_MANAGED_STORE_PATH=/var/lib/ferrum-modes/tls \
       --env FERRUM_MODE=mesh \
       --env FERRUM_MESH_TOPOLOGY=sidecar \
       --env FERRUM_MESH_CONFIG_PROTOCOL=file \
