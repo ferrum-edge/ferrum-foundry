@@ -85,11 +85,14 @@ BFF may reach the throwaway gateway over plaintext on the compose network.
 Without it, Foundry refuses a plaintext admin URL to any host but loopback;
 the production `.env` leaves it `false` and uses `https`.
 
-It also sets `FERRUM_SECURE_COOKIES=false` and `FERRUM_ENABLE_HSTS=false`,
-because the demo is plain HTTP: Safari and other WebKit browsers keep a
+It also sets `FERRUM_ENABLE_HSTS=false`, because the demo is plain HTTP. For
+the same reason the demo runs Foundry as its own Compose service,
+`foundry-demo`, with plain cookies: Safari and other WebKit browsers keep a
 `Secure` cookie only over HTTPS, even on loopback, so with secure cookies they
 would drop Foundry's session and CSRF cookies and every write would be
-refused. The production profile serves HTTPS and keeps both on.
+refused. The production profile's `foundry` service fixes
+`FERRUM_SECURE_COOKIES` to `true` in `compose.yaml` itself, so neither `.env`
+nor the shell can turn Secure, `__Host-` cookies off behind the TLS proxy.
 
 The demo publishes only loopback ports (`FOUNDRY_DEMO_PORT` 8088,
 `FERRUM_DEMO_PROXY_PORT` 8000, `FERRUM_DEMO_ADMIN_PORT` 9000), and its identity

@@ -5,6 +5,7 @@ import {
   PROBE_ID,
   READ_PROBES,
   WRITE_PROBES,
+  ADDITIONAL_WRITE_PROBES,
   addressesNamespace,
   bffForwardsScoped,
   classifyDenial,
@@ -19,7 +20,7 @@ const SCOPED_ADMIN_READ_OF_AUDIT_PATTERN = /scoped admin read of audit log was r
 const SCOPED_HEALTH_REPORTS_MODE_FILE_PATTERN =
   /scoped \/health reports mode "file", unrestricted \/health "database"/;
 const CONFIG_BACKUP_MODEL_EXPECTS_ADMITTED_PATTERN =
-  /configBackup .*model expects admitted, gateway answered 503 "No database"/;
+  /configBackup .*model expects admitted \(\d+\), gateway answered 503 "No database"/;
 const CONFIG_BACKUP_MODEL_EXPECTS_READ_ONLY_PATTERN =
   /configBackup .*model expects read-only denial, gateway answered 503 unavailable/;
 const CONFIG_BACKUP_MODEL_EXPECTS_READ_ONLY_DENIAL_PATTERN =
@@ -30,9 +31,9 @@ const EXPECTATION_PATTERN = /expectation must be/;
 const VIEWER_READ_OF_MCP_TOOL_PATTERN =
   /viewer read of MCP tool catalog answered "Not Found", expected the handler's "Proxy not found"/;
 const OPERATOR_PROXIES_MODEL_EXPECTS_ADMITTED_PATTERN =
-  /operator proxies .*model expects admitted, gateway answered role denial requiring admin/;
+  /operator proxies .*model expects admitted \(\d+\), gateway answered role denial requiring admin/;
 const OPERATIONAL_ACTIONS_EXPECTS_ADMITTED_PATTERN =
-  /operationalActions .*model expects admitted, gateway answered read-only denial/;
+  /operationalActions .*model expects admitted \(\d+\), gateway answered read-only denial/;
 const READ_OF_AUDIT_LOG_EXPECTED_PATTERN =
   /read of audit log: expected an explicit 403 requiring admin/;
 const VIEWER_READ_OF_PROXIES_REFUSED_PATTERN = /viewer read of proxies was refused \(403\)/;
@@ -42,6 +43,12 @@ const GATEWAY_ANSWERED_401_AUTHENTICATION_FAILED_PATTERN =
   /gateway answered 401: authentication failed/;
 const OPERATOR_PROXIES_GATEWAY_ANSWERED_ADMITTED_PATTERN =
   /operator proxies .*gateway answered admitted \(204\)/;
+const FLEET_REFRESH_EXPECTS_ADMITTED_PATTERN =
+  /operator fleetOperations \(POST \/backend-capabilities\/refresh\): model expects admitted \(200\), gateway answered 500 unavailable/;
+const VALIDATE_500_PATTERN =
+  /operator operationalActions \(POST \/admin\/tls\/validate\): model expects admitted \(400\), gateway answered 500 unavailable/;
+const REFRESH_UNAVAILABLE_PATTERN =
+  /fleetOperations \(POST \/backend-capabilities\/refresh\): model expects 503 "proxy_state unavailable in this mode", gateway answered 503 unavailable \("No proxy state available"\)/;
 const FERRUM_DEMO_CONFIRM_TARGET_MISMATCH_PATTERN =
   /FERRUM_DEMO_CONFIRM_TARGET must exactly equal "https:\/\/gateway\.example#tenant-a"/;
 
@@ -70,7 +77,16 @@ const EDGE_ROUTES = [
   { method: "DELETE", prefix: "/admin/tls/certificates/", role: "admin", gate: "read-only-mode", ok: 404, fleetGlobal: true },
   { method: "POST", prefix: "/admin/tls/validate", role: "operator", gate: "none", ok: 400, fleetGlobal: true },
   { method: "POST", prefix: "/admin/tls/rotate/", role: "operator", gate: "none", ok: 400, fleetGlobal: true },
-  { method: "POST", prefix: "/mesh/egress-scope/test", role: "operator", gate: "none", ok: 404, fleetGlobal: true },
+  { method: "POST", prefix: "/mesh/egress-scope/test", role: "operator", gate: "none", ok: 404, fleetGlobal: true, noProxyState: "No proxy state available" },
+  {
+    method: "POST",
+    prefix: "/backend-capabilities/refresh",
+    role: "operator",
+    gate: "none",
+    ok: 200,
+    fleetGlobal: true,
+    noProxyState: "proxy_state unavailable in this mode",
+  },
   { method: "GET", prefix: "/admin/tls/inventory", role: "operator", gate: "none", ok: 200, fleetGlobal: true },
   { method: "GET", prefix: "/gateway-trust-bundles", role: "operator", gate: "none", ok: 200, collection: true },
   { method: "GET", prefix: "/audit", role: "admin", gate: "none", ok: 200 },
@@ -154,6 +170,11 @@ function fakeGateway({
     }
     if (readOnly && rule.gate !== "none") {
       return { status: 403, body: { error: "Admin API is in read-only mode" } };
+    }
+    // A control plane or node agent holds no proxy state: these handlers
+    // answer their own typed 503 after the role check.
+    if (rule.noProxyState && (mode === "cp" || mode === "node_agent")) {
+      return { status: 503, body: { error: rule.noProxyState } };
     }
     return {
       status: rule.ok,
@@ -262,6 +283,57 @@ describe("capability parity contract", () => {
     assert.equal(result.writes.admin.configBackup, 503);
     // The other config-store surfaces still answer the read-only 403.
     assert.equal(result.writes.admin.proxies, 403);
+  });
+
+  it("agrees with a control plane, where both fleet operations answer their own no-proxy-state 503", async () => {
+    const { send } = fakeGateway({ mode: "cp" });
+    const result = await verifyCapabilityParity(send, { expectation: "writable" });
+    assert.equal(result.writes.operator.fleetOperations, 503);
+    assert.equal(result.writes.operator["fleetOperations.backendCapabilityRefresh"], 503);
+    assert.equal(result.writes.viewer["fleetOperations.backendCapabilityRefresh"], 403);
+    assert.equal(result.writes.operator.proxies, 404);
+  });
+
+  it("probes the backend capability refresh with its own answers", async () => {
+    const { send } = fakeGateway();
+    const result = await verifyCapabilityParity(send, { expectation: "writable" });
+    assert.equal(result.writes.operator["fleetOperations.backendCapabilityRefresh"], 200);
+    assert.equal(result.writes.viewer["fleetOperations.backendCapabilityRefresh"], 403);
+
+    // The refresh breaking while the dry-run still answers fails the surface.
+    const broken = fakeGateway({
+      override: (role, request) => role !== "viewer" && request.path === "/backend-capabilities/refresh"
+        ? { status: 500, body: { error: "probe pass failed" } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(broken.send, { expectation: "writable" }),
+      FLEET_REFRESH_EXPECTS_ADMITTED_PATTERN,
+    );
+
+    // On a control plane each handler's own typed 503 is required.
+    const swapped = fakeGateway({
+      mode: "cp",
+      override: (role, request) => role !== "viewer" && request.path === "/backend-capabilities/refresh"
+        ? { status: 503, body: { error: "No proxy state available" } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(swapped.send, { expectation: "writable" }),
+      REFRESH_UNAVAILABLE_PATTERN,
+    );
+  });
+
+  it("never treats any 5xx as admitted, for any surface", async () => {
+    const { send } = fakeGateway({
+      override: (role, request) => role === "operator" && request.path === "/admin/tls/validate"
+        ? { status: 500, body: { error: "validation crashed" } }
+        : undefined,
+    });
+    await assert.rejects(
+      verifyCapabilityParity(send, { expectation: "writable" }),
+      VALIDATE_500_PATTERN,
+    );
   });
 
   it("never treats a 503 as admitted, even for an allowed surface", async () => {
@@ -426,7 +498,15 @@ describe("capability parity contract", () => {
   it("defines safe expected outcomes for every gateway-backed surface", () => {
     assert.ok(BFF_ONLY_SURFACES.has("bffSettings"));
     assert.equal(Object.hasOwn(WRITE_PROBES, "bffSettings"), false);
-    for (const [surface, probe] of Object.entries(WRITE_PROBES)) {
+    const probes = [
+      ...Object.entries(WRITE_PROBES),
+      ...Object.entries(ADDITIONAL_WRITE_PROBES).flatMap(([surface, extra]) =>
+        extra.map((probe) => [`${surface}.${probe.key}`, probe])),
+    ];
+    for (const [surface, probe] of probes) {
+      // Every probe names its exact admitted answer, and none is a 5xx.
+      const statuses = [probe.admittedStatus].flat();
+      assert.ok(statuses.length > 0 && statuses.every((status) => status < 500), `${surface} admittedStatus`);
       if (probe.method === "DELETE") {
         assert.ok(probe.path.includes(PROBE_ID), `${surface} must delete only the probe id`);
         assert.equal(probe.admittedStatus, 404, `${surface} must require a missing probe id`);
@@ -437,6 +517,7 @@ describe("capability parity contract", () => {
             "/admin/tls/validate",
             `/admin/tls/rotate/${PROBE_ID}`,
             "/mesh/egress-scope/test",
+            "/backend-capabilities/refresh",
           ].includes(probe.path),
           `${surface} POST`,
         );

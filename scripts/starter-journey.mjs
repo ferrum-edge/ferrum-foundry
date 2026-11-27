@@ -32,6 +32,7 @@ const NAMESPACE = process.env.FERRUM_NAMESPACE ?? "ferrum-foundry-demo";
 const BACKEND_HOST = process.env.FERRUM_STARTER_BACKEND_HOST ?? "demo-backend";
 const BACKEND_PORT = Number(process.env.FERRUM_STARTER_BACKEND_PORT ?? "8081");
 const IDENTITY_HEADER = "X-Demo-Identity";
+const SECURE_ATTRIBUTE_PATTERN = /;\s*secure\s*(?:;|$)/i;
 const API_KEY = process.env.FERRUM_STARTER_API_KEY ?? "starter-demo-key-do-not-reuse";
 
 const RESOURCES = {
@@ -194,9 +195,15 @@ async function openSession() {
     signal: AbortSignal.timeout(20_000),
   });
   assert.equal(response.status, 200, "could not open an administrator session");
-  const cookies = (response.headers.getSetCookie?.() ?? [])
-    .map((cookie) => cookie.split(";")[0])
-    .join("; ");
+  const issued = response.headers.getSetCookie?.() ?? [];
+  // The demo is plain HTTP on loopback, where WebKit drops Secure cookies:
+  // its BFF (`foundry-demo`) issues plain ones (#759 review F1).
+  for (const name of ["ferrum-foundry-session", "ferrum-foundry-csrf"]) {
+    const cookie = issued.find((entry) => entry.startsWith(`${name}=`));
+    assert.ok(cookie, `the demo BFF issued no ${name} cookie`);
+    assert.ok(!SECURE_ATTRIBUTE_PATTERN.test(cookie), `the demo BFF issued ${name} as Secure`);
+  }
+  const cookies = issued.map((cookie) => cookie.split(";")[0]).join("; ");
   const { csrfToken } = await response.json();
   assert.ok(csrfToken, "the session carried no CSRF token");
   return {

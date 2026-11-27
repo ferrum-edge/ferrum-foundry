@@ -30,7 +30,9 @@
 # See README.md, and docs/getting-started.md for the first-route walkthrough.
 
 services:
-  foundry:
+  # The production BFF. The demo runs the same definition as `foundry-demo`
+  # below; the two differ only in profile and cookie policy.
+  foundry: &foundry
     # Published v0.5.6 digest. Set FOUNDRY_IMAGE to another released pairing
     # for production; CI overrides this with the image under test.
     image: ${FOUNDRY_IMAGE:-ferrumedge/ferrum-foundry@sha256:1dbe6878b6833bb56805c6de5f5162f1f4970b7a50d71d8921ea2f6bdd46010e}
@@ -39,11 +41,11 @@ services:
     # logs and exits nonzero; orchestration grace must exceed that deadline
     # (Compose otherwise defaults to 10s and can force-kill first).
     stop_grace_period: 20s
-    profiles: [production, demo]
+    profiles: [production]
     # Deliberately no host port: the BFF is reachable only through the proxy.
     expose:
       - "8080"
-    environment:
+    environment: &foundry-environment
       NODE_ENV: production
       FERRUM_ADMIN_URL: ${FERRUM_ADMIN_URL:?set FERRUM_ADMIN_URL in .env}
       # Production refuses a plaintext admin URL to any host but loopback, since
@@ -57,10 +59,10 @@ services:
       FERRUM_AUTH_LOGIN_URL: ${FERRUM_AUTH_LOGIN_URL:-/oauth2/start}
       FERRUM_AUTH_LOGOUT_URL: ${FERRUM_AUTH_LOGOUT_URL:-/oauth2/sign_out}
       FERRUM_ENABLE_HSTS: ${FERRUM_ENABLE_HSTS:-true}
-      # Secure, __Host- cookies. Only the HTTP-only demo bootstrap turns this
-      # off: browsers that do not treat plain-HTTP loopback as secure (Safari,
-      # WebKit) would otherwise drop the session and CSRF cookies.
-      FERRUM_SECURE_COOKIES: ${FERRUM_SECURE_COOKIES:-true}
+      # Secure, __Host- cookies, fixed here rather than read from .env or the
+      # shell, so no setting can turn them off behind the TLS proxy. Only
+      # `foundry-demo` differs.
+      FERRUM_SECURE_COOKIES: "true"
       # Failed proxy-proof throttle (docs/authentication.md, "Failed-authentication
       # lockout"). 0 failures disables it.
       FERRUM_AUTH_MAX_FAILURES: ${FERRUM_AUTH_MAX_FAILURES:-10}
@@ -77,6 +79,22 @@ services:
       - ./ca:/etc/ferrum/ca:ro
     # Deliberately no `env_file`: the OAuth client secret never enters the
     # BFF's environment.
+
+  # The demo BFF: the production definition above, on the demo profile, with
+  # plain cookies. The demo is served over plain HTTP on loopback, and
+  # browsers that do not treat plain-HTTP loopback as secure (Safari, WebKit)
+  # drop Secure cookies, so this one service turns them off. It answers to
+  # `foundry` on the stack network, so the demo proxy's configuration is the
+  # production one's. The production profile cannot select it.
+  foundry-demo:
+    <<: *foundry
+    profiles: [demo]
+    environment:
+      <<: *foundry-environment
+      FERRUM_SECURE_COOKIES: "false"
+    networks:
+      default:
+        aliases: [foundry]
 
   oauth2-proxy:
     # Third-party images name their tag and digest together: the digest is what
@@ -146,7 +164,7 @@ services:
     restart: unless-stopped
     profiles: [demo]
     depends_on:
-      - foundry
+      - foundry-demo
     # Loopback only. The demo identity stub trusts a request header.
     ports:
       - "127.0.0.1:${FOUNDRY_DEMO_PORT:-8088}:8080"

@@ -431,7 +431,15 @@ function EgressTab() {
   const [testResult, setTestResult] = useState<string | null>(null);
 
   if (isLoading) return <SkeletonCard />;
-  if (!data) return <MeshReadFailure query={query} what="Egress scope" />;
+  if (!data) {
+    // A gateway without proxy state (a control plane, a node agent) answers
+    // the egress read with the same 503 as the dry-run. Once /health has
+    // established that mode, say why instead of a bare unavailable state.
+    if (canTest.blockedBy === "gateway-unavailable") {
+      return <CapabilityNotice verdict={canTest} />;
+    }
+    return <MeshReadFailure query={query} what="Egress scope" />;
+  }
 
   return (
     <div className="space-y-4">

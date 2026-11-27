@@ -128,7 +128,11 @@ export function addressesNamespace(method, path) {
 
 /**
  * One request per gateway-backed surface, each reaching the same role check
- * and write gate as the surface's real mutations.
+ * and write gate as the surface's real mutations. `admittedStatus` is the
+ * exact answer (a status or a list) an admitted probe gets; nothing else is an
+ * admission, a 5xx least of all. `unavailable` is the typed answer of a
+ * gateway that holds no proxy state, where the model reports the surface as
+ * `gateway-unavailable`.
  */
 export const WRITE_PROBES = {
   proxies: { method: "DELETE", path: `/proxies/${PROBE_ID}`, admittedStatus: 404 },
@@ -144,18 +148,22 @@ export const WRITE_PROBES = {
   // mode `require_db` answers the documented `503 {"error":"No database"}`
   // before the read-only gate, which a read-only expectation accepts as an
   // unavailable no-writable-store outcome.
+  // An admitted restore without `?confirm=true` is refused with 400.
   configBackup: {
     method: "POST",
     path: "/restore",
     rawBody: "{",
     acceptsNoDatabaseRestore: true,
+    admittedStatus: 400,
   },
-  configExport: { method: "GET", path: "/backup" },
+  configExport: { method: "GET", path: "/backup", admittedStatus: 200 },
   tlsMaterial: { method: "DELETE", path: `/admin/tls/certificates/${PROBE_ID}`, admittedStatus: 404 },
   // `handle_rotate` checks the role and audit admission, then refuses a
   // surface it does not know with `400` before requesting any reload.
   tlsRotation: { method: "POST", path: `/admin/tls/rotate/${PROBE_ID}`, admittedStatus: 400 },
-  operationalActions: { method: "POST", path: "/admin/tls/validate", body: {} },
+  // `handle_validate` refuses an empty body with 400 ("at least one of
+  // cert_pem/key_pem, ca_bundle_pem, or crl_pem must be provided").
+  operationalActions: { method: "POST", path: "/admin/tls/validate", body: {}, admittedStatus: 400 },
   // `handle_mesh_egress_scope_test` checks the operator role, then answers a
   // gateway without a mesh egress scope `404 {"error":"No active mesh egress
   // scope"}` before it reads the body. It is a stateless dry-run either way.
@@ -164,8 +172,42 @@ export const WRITE_PROBES = {
     path: "/mesh/egress-scope/test",
     body: { host: `${PROBE_ID}.invalid` },
     admittedStatus: 404,
+    unavailable: { status: 503, error: "No proxy state available" },
   },
 };
+
+/**
+ * Further probes for a surface whose actions reach different handlers, each
+ * judged by the same verdict. `fleetOperations` also covers the backend
+ * capability refresh (`handle_backend_capabilities_refresh`): the operator
+ * role, then a synchronous probe pass answering `200 {"status": …}`, or, with
+ * no proxy state, its own `503 {"error":"proxy_state unavailable in this
+ * mode"}`.
+ */
+export const ADDITIONAL_WRITE_PROBES = {
+  fleetOperations: [
+    {
+      key: "backendCapabilityRefresh",
+      method: "POST",
+      path: "/backend-capabilities/refresh",
+      admittedStatus: 200,
+      unavailable: { status: 503, error: "proxy_state unavailable in this mode" },
+    },
+  ],
+};
+
+/** Every probe for `surface`, with the key its result is recorded under. */
+export function surfaceProbes(surface) {
+  return [
+    { key: surface, probe: WRITE_PROBES[surface] },
+    ...(ADDITIONAL_WRITE_PROBES[surface] ?? []).map((probe) => ({ key: `${surface}.${probe.key}`, probe })),
+  ];
+}
+
+/** The statuses an admitted probe may answer: never a 5xx. */
+export function admittedStatuses(probe) {
+  return [probe.admittedStatus].flat();
+}
 
 /** Surfaces the gateway never sees; the BFF's own tests cover them. */
 export const BFF_ONLY_SURFACES = new Set(["bffSettings"]);
@@ -217,12 +259,16 @@ export function isNoDatabaseRestore(response) {
 }
 
 /**
- * Edge's documented answer when it holds no proxy state (a control plane or a
- * node agent): `POST /mesh/egress-scope/test` returns this typed `503` after
- * the role check (`docs/admin_api.md`).
+ * Whether `response` is the probe's typed answer from a gateway that holds no
+ * proxy state (a control plane or a node agent), returned after the role
+ * check: `503 {"error":"No proxy state available"}` for the mesh egress
+ * dry-run (`docs/admin_api.md`), `503 {"error":"proxy_state unavailable in
+ * this mode"}` for the backend capability refresh.
  */
-export function isNoProxyState(response) {
-  return response.status === 503 && response.body?.error === "No proxy state available";
+export function isNoProxyState(response, probe = WRITE_PROBES.fleetOperations) {
+  return probe.unavailable !== undefined
+    && response.status === probe.unavailable.status
+    && response.body?.error === probe.unavailable.error;
 }
 
 /** Classify a response as the gateway's own refusal, or `null` if admitted. */
@@ -256,12 +302,16 @@ export function observedFacts(health) {
   };
 }
 
-function describeExpected(verdict, surface) {
-  if (verdict.allowed) return "admitted";
+function describeExpected(verdict, surface, probe) {
+  if (verdict.allowed) return `admitted (${admittedStatuses(probe).join(" or ")})`;
   if (verdict.blockedBy === "role") {
     return `role denial requiring ${capabilityRequirement(surface).minimumRole}`;
   }
-  if (verdict.blockedBy === "gateway-unavailable") return '503 "No proxy state available"';
+  if (verdict.blockedBy === "gateway-unavailable") {
+    return probe.unavailable
+      ? `${probe.unavailable.status} ${JSON.stringify(probe.unavailable.error)}`
+      : "an unavailable answer (the probe declares none)";
+  }
   return "read-only denial";
 }
 
@@ -269,8 +319,8 @@ function describeActual(response, denial) {
   if (response.status === 401) return "401: authentication failed, nothing was tested";
   // A 503 is never an admission: the write did not run.
   if (isNoDatabaseRestore(response)) return '503 "No database" (restore unavailable)';
-  if (response.status === 503) {
-    return `503 unavailable (${JSON.stringify(response.body?.error ?? response.body)})`;
+  if (response.status >= 500) {
+    return `${response.status} unavailable (${JSON.stringify(response.body?.error ?? response.body)})`;
   }
   if (!denial) return `admitted (${response.status})`;
   if (denial.kind === "role") return `role denial requiring ${denial.requiredRole}`;
@@ -296,59 +346,60 @@ async function comparePrincipal(send, { expectation, observed, scoped, mismatche
   for (const role of ROLES) {
     writes[role] = {};
     for (const surface of surfaces) {
-      const probe = WRITE_PROBES[surface];
-      const facts = { role, namespaceScoped: scoped, ...observed };
-      const verdict = resolveCapability(surface, facts);
-      const label = `${who(role)} ${surface} (${probe.method} ${probe.path})`;
+      for (const { key, probe } of surfaceProbes(surface)) {
+        const facts = { role, namespaceScoped: scoped, ...observed };
+        const verdict = resolveCapability(surface, facts);
+        const label = `${who(role)} ${surface} (${probe.method} ${probe.path})`;
 
-      if (scoped && !bffForwardsScoped(probe.method, probe.path)) {
-        // The BFF refuses it before signing; the UI must not offer it either.
-        writes[role][surface] = "bff-refused";
-        if (verdict.allowed) {
-          mismatches.push(`${label}: model offers it, but the BFF namespace route ceiling refuses it`);
+        if (scoped && !bffForwardsScoped(probe.method, probe.path)) {
+          // The BFF refuses it before signing; the UI must not offer it either.
+          writes[role][key] = "bff-refused";
+          if (verdict.allowed) {
+            mismatches.push(`${label}: model offers it, but the BFF namespace route ceiling refuses it`);
+          }
+          continue;
         }
-        continue;
-      }
-      if (scoped && verdict.blockedBy === "namespace-scope") {
-        mismatches.push(`${label}: model withholds it as fleet-wide, but the BFF forwards it`);
-        continue;
-      }
+        if (scoped && verdict.blockedBy === "namespace-scope") {
+          mismatches.push(`${label}: model withholds it as fleet-wide, but the BFF forwards it`);
+          continue;
+        }
 
-      const response = await send(role, probe, { scoped });
-      const denial = classifyDenial(response);
-      writes[role][surface] = response.status;
+        const response = await send(role, probe, { scoped });
+        const denial = classifyDenial(response);
+        writes[role][key] = response.status;
 
-      let agrees;
-      if (response.status === 401) {
-        agrees = false; // authentication failed: the probe tested nothing
-      } else if (verdict.allowed) {
-        const admittedStatus = probe.admittedStatus;
-        // A 503 is a failed or unavailable write, never an admission.
-        agrees = denial === null
-          && response.status !== 503
-          && (admittedStatus === undefined || response.status === admittedStatus);
-      } else if (verdict.blockedBy === "role") {
-        agrees = denial?.kind === "role"
-          && denial.requiredRole === capabilityRequirement(surface).minimumRole;
-      } else if (verdict.blockedBy === "gateway-unavailable") {
-        // A gateway without proxy state: Edge checks the role, then answers
-        // this typed 503. Never an admission, and the model must not offer it.
-        agrees = isNoProxyState(response);
-      } else {
-        // File/DP restore answers the documented `503 {"error":"No database"}`
-        // before the read-only gate; under a read-only expectation that is an
-        // expected no-writable-store outcome, not an admission.
-        const readOnlyDenial = denial?.kind === "gateway-read-only";
-        const noDatabaseRestore = expectation === "read-only"
-          && probe.acceptsNoDatabaseRestore === true
-          && isNoDatabaseRestore(response);
-        agrees = readOnlyDenial || noDatabaseRestore;
-      }
-      if (!agrees) {
-        mismatches.push(
-          `${label}: model expects ${describeExpected(verdict, surface)}, `
-          + `gateway answered ${describeActual(response, denial)}`,
-        );
+        let agrees;
+        if (response.status === 401) {
+          agrees = false; // authentication failed: the probe tested nothing
+        } else if (verdict.allowed) {
+          // Only the probe's own admitted answer counts. A 5xx is a failed or
+          // unavailable action, never an admission (no probe lists one).
+          agrees = denial === null
+            && response.status < 500
+            && admittedStatuses(probe).includes(response.status);
+        } else if (verdict.blockedBy === "role") {
+          agrees = denial?.kind === "role"
+            && denial.requiredRole === capabilityRequirement(surface).minimumRole;
+        } else if (verdict.blockedBy === "gateway-unavailable") {
+          // A gateway without proxy state: Edge checks the role, then answers
+          // the probe's own typed 503. Never an admission.
+          agrees = isNoProxyState(response, probe);
+        } else {
+          // File/DP restore answers the documented `503 {"error":"No database"}`
+          // before the read-only gate; under a read-only expectation that is an
+          // expected no-writable-store outcome, not an admission.
+          const readOnlyDenial = denial?.kind === "gateway-read-only";
+          const noDatabaseRestore = expectation === "read-only"
+            && probe.acceptsNoDatabaseRestore === true
+            && isNoDatabaseRestore(response);
+          agrees = readOnlyDenial || noDatabaseRestore;
+        }
+        if (!agrees) {
+          mismatches.push(
+            `${label}: model expects ${describeExpected(verdict, surface, probe)}, `
+            + `gateway answered ${describeActual(response, denial)}`,
+          );
+        }
       }
     }
   }
@@ -463,6 +514,15 @@ export async function verifyCapabilityParity(send, { expectation, grants = [] } 
     [...surfaces].sort(),
     "every gateway-backed capability surface needs exactly one parity probe",
   );
+  for (const surface of surfaces) {
+    for (const { key, probe } of surfaceProbes(surface)) {
+      const statuses = admittedStatuses(probe);
+      assert.ok(
+        statuses.length > 0 && statuses.every((status) => Number.isInteger(status) && status < 500),
+        `${key} must name the exact non-5xx status an admitted probe answers`,
+      );
+    }
+  }
 
   const mismatches = [];
   const { writes, reads } = await comparePrincipal(send, {

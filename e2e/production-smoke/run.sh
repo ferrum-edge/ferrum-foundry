@@ -211,7 +211,10 @@ up() {
     browser --fail -o /dev/null "$ISSUER/.well-known/openid-configuration"
 
   step "Production profile"
-  compose up --detach --wait --wait-timeout 180
+  # An operator's shell asking for plain cookies must not reach the
+  # production BFF: compose.yaml fixes them Secure (verify checks the
+  # cookies it issues).
+  FERRUM_SECURE_COOKIES=false compose up --detach --wait --wait-timeout 180
   wait_for "oauth2-proxy behind nginx" start_redirect_is_ready
   compose ps --all
 }
@@ -369,6 +372,16 @@ verify() {
   expect_equal "admin principal" \
     "$(session_field "$admin_jar" '.principal | [.subject, .role, .namespaces, .authMode]')" \
     "[\"smoke-admin\",\"admin\",[\"$NAMESPACE\"],\"trusted-proxy\"]"
+  # The session and CSRF cookies are Secure and __Host- on the production
+  # profile, although `up` ran with FERRUM_SECURE_COOKIES=false exported.
+  # The jar holds only oauth2-proxy's cookie, so Foundry opens a session.
+  cookies="$(browser -o /dev/null -D - -b "$admin_jar" "$ORIGIN/api/auth/session" | tr -d '\r' | grep -i '^set-cookie:' || true)"
+  for name in __Host-ferrum-foundry-session __Host-ferrum-foundry-csrf; do
+    line="$(grep -i "^set-cookie: $name=" <<<"$cookies" || true)"
+    [ -n "$line" ] || fail "the production BFF issued no $name cookie"
+    grep -qi '; *secure\(;\|$\)' <<<"$line" || fail "the production BFF issued $name without Secure"
+  done
+  echo "ok: the production BFF issues only Secure, __Host- session and CSRF cookies"
 
   viewer_jar="$WORK/viewer.jar"
   # A user in several groups, the Ferrum one not first: oauth2-proxy joins

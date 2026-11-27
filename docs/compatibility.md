@@ -590,7 +590,7 @@ envelope; they do not qualify other Edge images or gateway modes.
 | Gateway mode | `database` on SQLite, admin writes enabled, admin JWT with audience and `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` | Pinned Gateway Contract, Deployment Starter, Critical Journeys, Container Gate |
 | Read-only admin API | `database` started with `FERRUM_ADMIN_READ_ONLY=true` | Pinned Gateway Contract (capability parity, read-only half) |
 | Database backends | `database` on PostgreSQL, on MySQL and on MongoDB (a one-member replica set), from the digest-pinned images in `scripts/gateway-modes/up.sh`, each from an empty database | Gateway Modes (postgres), (mysql), (mongodb): seed twice and verify the canonical backup, writable capability parity, every page read through the BFF |
-| Control plane | `cp` on SQLite, distributing to a data plane over plaintext gRPC | Gateway Modes (cp-dp): writable capability parity on the CP, every page read through the BFF, the metrics placeholders |
+| Control plane | `cp` on SQLite, distributing to a data plane over plaintext gRPC | Gateway Modes (cp-dp): a proxy created through Foundry on the CP is served by the DP's admin API and routed by its data plane within a bounded wait, each side reports the other connected, writable capability parity on the CP, every page read through the BFF, the metrics placeholders |
 | Read-only gateway modes | `file` (a fresh configuration file), the `dp` of that CP + DP pair, and a `mesh` sidecar on a local mesh document (file protocol, a throwaway root and X.509-SVID) | Gateway Modes (file), (cp-dp), (mesh): read-only capability parity, every page read through the BFF, the metrics placeholders |
 | Roles | `viewer`, `operator`, `admin` | capability parity (every surface and the launch reads, per role); critical journeys through the identity proxy |
 | Authentication | `trusted-proxy` behind the starter's nginx identity proxy, with the shared group-to-role policy | Deployment Starter, Critical Journeys |
@@ -614,17 +614,24 @@ The database backend, control plane, read-only gateway mode and other browser
 engine rows are new for 1.0.0 and gate it (`QUALIFICATION_JOBS` in
 `scripts/hosted-qualification.mjs`); no earlier release was qualified on them.
 The machine-readable `tested` record gains them in the 1.0.0 release PR.
-"Every page read through the BFF" is `server/routes/page-reads.gateway.test.ts`:
-each read a Foundry page sends, as an unrestricted and as a namespace-scoped
-administrator, must answer `200` with a body the page parses, except that the
-mode-dependent families the client already treats as optional (mesh,
-waypoints, trust, API specs, audit, chargeback, backend capabilities) may
-answer `404` or `503` (not served by that gateway). It also checks the
-`/health` mode, and that `adminMetricsReporting` hides exactly the
-`/admin/metrics` values the gateway serves as placeholders (Edge's
+"Every page read through the BFF" is `server/routes/page-reads.gateway.test.ts`.
+Each list and summary read a Foundry page sends, as an unrestricted and as a
+namespace-scoped administrator, must answer `200` with the fields the page
+consumes (the list envelope, the metrics gateway block, the mesh snapshot
+shapes, the runtime overlay through the same rules as its decoder). Where the
+job's fixture leaves a feature off, the read must give exactly the recorded
+`404` or `503` instead, per mode: API specs, audit and gateway trust need a
+configuration database, the mesh observability reads are served by the mesh
+sidecar (slice drift by the control plane), and no fixture configures mesh
+federation or a waypoint. Losing a read the fixture enables fails. It also
+opens the first row of each collection as the editors do, requires the
+fixture's proxy in the list where the job created one, checks that `/health`
+is ready in the expected mode, and that `adminMetricsReporting` hides exactly
+the `/admin/metrics` values the gateway serves as placeholders (Edge's
 no-proxy-state skeleton on a control plane). It reads; it does not render the
 pages, so the mesh views are qualified at the API boundary on a mesh sidecar
-with no control plane, not against a populated mesh.
+with no control plane, not against a populated mesh, and the federation and
+waypoint views only for their not-served state.
 
 ### Tested scale
 
@@ -704,12 +711,16 @@ release notes.
 
 - `node_agent` gateway mode. It needs the Kubernetes API, eBPF capabilities
   and the `-ebpf` image variant, none of which a CI runner provides. Foundry
-  treats it as a read-only gateway without proxy state: every write surface is
-  read-only, the fleet operations (the backend-capability refresh and the mesh
-  egress dry-run) are unavailable with Edge's `503 "No proxy state available"`
-  as the reason, and the Metrics page and Dashboard show its zeroed runtime
-  values as not reported ([capabilities.md](capabilities.md)). The mock admin
-  gateway reproduces that; no real node agent runs in CI.
+  treats it as a read-only gateway without proxy state
+  ([capabilities.md](capabilities.md)): every configuration write and the
+  managed TLS material are read-only, and configuration export is unavailable;
+  the fleet operations (the backend-capability refresh and the mesh egress
+  dry-run) are unavailable, with Edge's typed `503` as the reason; the
+  ungated actions (TLS rotation and validation, and BFF settings) stay
+  available to an unrestricted operator or administrator, as Edge serves them;
+  and the Metrics page and Dashboard show its zeroed runtime values as not
+  reported. The mock admin gateway (`MOCK_GATEWAY_MODE=node_agent`) reproduces
+  those answers; no real node agent runs in CI.
 - Support applies to published releases only: any published Foundry release
   against an Edge release other than the one its immutable record names
   ([History](#history)) is unsupported, as is any unpublished build. Hosted

@@ -101,7 +101,7 @@ namespace registry, and audit.
 | `upstreams` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /upstreams` |
 | `pluginConfigs` | `operator` | `config-store` | `admit_write` on `POST/PUT/DELETE /plugins/config` |
 | `operationalActions` (`POST /admin/tls/validate`) | `operator` | `none`, fleet-wide | no gate |
-| `fleetOperations` (backend-capability refresh, mesh egress dry-run) | `operator` | `none`, fleet-wide; unavailable on `cp` and `node_agent` | role check only in `POST /backend-capabilities/refresh` and `POST /mesh/egress-scope/test`; a gateway with no proxy state then answers `503 {"error":"No proxy state available"}`, shown as unavailable (`gateway-unavailable`) with that reason, never as admitted |
+| `fleetOperations` (backend-capability refresh, mesh egress dry-run) | `operator` | `none`, fleet-wide; unavailable on `cp` and `node_agent` | role check only in `POST /backend-capabilities/refresh` and `POST /mesh/egress-scope/test`; a gateway with no proxy state then answers each with its own typed `503` (the refresh `{"error":"proxy_state unavailable in this mode"}`, the dry-run `{"error":"No proxy state available"}`), shown as unavailable (`gateway-unavailable`) with that reason, never as admitted |
 | `tlsRotation` (`POST /admin/tls/rotate/{surface}`) | `operator` | `none`, fleet-wide | `admit_audited_operation` in `handle_rotate` |
 | `consumers` | `admin` | `config-store` | `admit_write` on `POST/PUT/DELETE /consumers` |
 | `consumerCredentials` | `admin` | `config-store` | `admit_write` on `/consumers/{id}/credentials/{type}` |
@@ -274,18 +274,28 @@ one admitted, a different required role named, or a read-only denial missing.
 `capabilityRequirement()` exposes each surface's role and gate, so the contract
 compares against this model rather than a second copy.
 
-- `DELETE` probes must return `404`; a successful deletion fails the contract.
-- The `POST /restore` probe in `file`/`dp` mode may answer the documented
-  `503 {"error":"No database"}` instead of the read-only `403`; the contract
-  accepts it as an unavailable no-writable-store outcome, never as an
-  admission. A differently-shaped `503`, or a `503` on any other surface,
-  fails.
+- Every probe names the exact answer an admitted request gets
+  (`admittedStatus`); any other answer, and every `5xx`, fails an allowed
+  surface. `DELETE` probes must return `404`; a successful deletion fails the
+  contract.
+- A surface whose actions reach different handlers has a probe per handler:
+  `fleetOperations` probes both the mesh egress dry-run and the backend
+  capability refresh (`ADDITIONAL_WRITE_PROBES`).
+- Typed outcomes that are not admissions are accepted only where the model
+  predicts them: the `POST /restore` probe in `file`/`dp` mode may answer the
+  documented `503 {"error":"No database"}` instead of the read-only `403`
+  (an unavailable no-writable-store outcome), and on a gateway without proxy
+  state each fleet operation must answer its own typed `503`
+  (`gateway-unavailable`). Any other `503` fails.
 - Writable runs require `FERRUM_DEMO_CONFIRM_TARGET` to name the gateway and
   namespace exactly, and must only target a disposable gateway.
 - It runs against a writable `database` gateway (inside
-  `npm run test:gateway-contract`) and against a second container started with
-  `FERRUM_ADMIN_READ_ONLY=true`. It first proves the gateway is in the expected
-  mode, so it cannot pass vacuously.
+  `npm run test:gateway-contract`, on SQLite in Pinned Gateway Contract and on
+  PostgreSQL, MySQL and MongoDB in Gateway Modes), against a second container
+  started with `FERRUM_ADMIN_READ_ONLY=true`, against a writable control plane
+  and, read-only by mode, against `file`, the `dp` of a CP + DP pair and a
+  `mesh` sidecar (Gateway Modes). It first proves the gateway is in the
+  expected mode, so it cannot pass vacuously.
 - Every check runs twice. As an **unrestricted** principal, fleet-global probes
   and `/health` are signed without an `ns` claim, as the BFF signs them; routes
   that address a namespace carry one, because both gateways set
@@ -321,9 +331,9 @@ upstream, consumer and plugin lists and detail pages, Health, and Metrics
 render every failed read through `ReadStateNotice` (#680). The TLS
 inventory read is a fleet view, so a namespace-scoped principal never sends it.
 
-Not checked: `file`, `dp`, `mesh`, and `node_agent` modes (no such gateway
-runs in CI), the failover-topology gate, and any Edge release other than the
-supported one. When the Edge pin moves, the contract re-runs against the new
+Not checked: `node_agent` mode (it needs Kubernetes and eBPF, which no CI
+runner provides; the mock admin gateway reproduces its refusals), the
+failover-topology gate, and any Edge release other than the supported one. When the Edge pin moves, the contract re-runs against the new
 image; a disagreement is a model change to review against ferrum-edge
 `src/admin/mod.rs`, not a probe to relax. `bffSettings` never reaches the
 gateway and is covered by the BFF's own tests.

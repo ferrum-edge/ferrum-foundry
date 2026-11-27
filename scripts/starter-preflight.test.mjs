@@ -54,6 +54,13 @@ const MAP_AUTH_GROUPS_FERRUM_NAMESPACES_PATTERN =
   /map \$auth_groups \$ferrum_namespaces \{\s*\n\s*default\s+"";/;
 const E2E_NAMESPACE_GRANTS_PATTERN = /ferrum-foundry-demo,ferrum-foundry-demo-b/;
 const EXPOSE_PATTERN = /expose:/;
+const PRODUCTION_PROFILE_PATTERN = /^ {4}profiles: \[production\]$/m;
+const DEMO_PROFILE_PATTERN = /^ {4}profiles: \[demo\]$/m;
+const SECURE_COOKIES_ON_PATTERN = /^ {6}FERRUM_SECURE_COOKIES: "true"$/m;
+const SECURE_COOKIES_OFF_PATTERN = /^ {6}FERRUM_SECURE_COOKIES: "false"$/m;
+const SECURE_COOKIES_ANY_PATTERN = /FERRUM_SECURE_COOKIES/g;
+const FOUNDRY_ALIAS_PATTERN = /^ {8}aliases: \[foundry\]$/m;
+const DEMO_PROXY_DEPENDS_PATTERN = /^ {4}depends_on:\n {6}- foundry-demo$/m;
 const INDENTED_PORTS_PATTERN = /^\s{4}ports:/m;
 const FOUNDRY_IMAGE_PATTERN = /^FOUNDRY_IMAGE=/m;
 const FOUNDRY_IMAGE_DEFAULT_PATTERN = /FOUNDRY_IMAGE=\$\{FOUNDRY_IMAGE:-\}/;
@@ -724,6 +731,30 @@ test("the shipped policy grants no test-only second namespace", async () => {
 
   const e2ePolicy = await readFile(new URL("../e2e/nginx/policy.conf", import.meta.url), "utf8");
   assert.match(e2ePolicy, E2E_NAMESPACE_GRANTS_PATTERN);
+});
+
+test("only the demo service runs Foundry without Secure cookies, and no setting changes either", async () => {
+  // The production profile terminates TLS: its session and CSRF cookies must
+  // be Secure and __Host- whatever .env or the shell says (#759 review F1).
+  const compose = await readFile(new URL("compose.yaml", STARTER), "utf8");
+  const production = compose.slice(compose.indexOf("  foundry:"), compose.indexOf("  foundry-demo:"));
+  const demo = compose.slice(compose.indexOf("  foundry-demo:"), compose.indexOf("  oauth2-proxy:"));
+  assert.match(production, PRODUCTION_PROFILE_PATTERN);
+  assert.match(production, SECURE_COOKIES_ON_PATTERN);
+  assert.match(demo, DEMO_PROFILE_PATTERN);
+  assert.match(demo, SECURE_COOKIES_OFF_PATTERN);
+  assert.match(demo, FOUNDRY_ALIAS_PATTERN, "the demo proxy reaches the demo BFF as foundry");
+  // Exactly the two literals: no interpolation an operator could override.
+  assert.equal([...compose.matchAll(SECURE_COOKIES_ANY_PATTERN)].length, 2);
+  const demoProxy = compose.slice(compose.indexOf("  demo-proxy:"), compose.indexOf("  demo-gateway:"));
+  assert.match(demoProxy, DEMO_PROXY_DEPENDS_PATTERN);
+
+  const example = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
+  assert.equal(example.FERRUM_SECURE_COOKIES, undefined, ".env.example must not offer the setting");
+  const bootstrap = await readFile(new URL("bootstrap-demo.sh", STARTER), "utf8");
+  assert.ok(!bootstrap.includes("FERRUM_SECURE_COOKIES"), "the demo bootstrap must not write it");
+  const overlay = await readFile(new URL("../e2e/compose.e2e.yaml", import.meta.url), "utf8");
+  assert.ok(overlay.includes("\n  foundry-demo:\n"), "the journey overlay must target the demo BFF");
 });
 
 test("the BFF publishes no host port in either profile", async () => {

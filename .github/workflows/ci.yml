@@ -394,6 +394,21 @@ jobs:
           FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
         run: npm run test:gateway-contract
 
+      - name: Write through Foundry on the control plane and see the data plane serve it
+        # A proxy created through the BFF on the CP must reach the DP within a
+        # bounded wait: its admin API serves it and its data plane routes it.
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && matrix.mode == 'cp-dp' }}
+        env:
+          FERRUM_CP_DP_SYNC_GATEWAY_CONTRACT: 'true'
+          FERRUM_CP_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_DP_ADMIN_URL: http://127.0.0.1:9010
+          FERRUM_DP_PROXY_URL: http://127.0.0.1:8000
+          FERRUM_DEMO_BACKEND_HOST: host.docker.internal
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+        run: npm exec -- vitest run --project server server/routes/cp-dp-sync.gateway.test.ts
+
       - name: Verify writable capability parity on the control plane
         if: ${{ !cancelled() && steps.up.outcome == 'success' && matrix.mode == 'cp-dp' }}
         env:

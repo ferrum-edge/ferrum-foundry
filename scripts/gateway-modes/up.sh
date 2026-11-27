@@ -27,16 +27,20 @@ common_admin=(
   --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true
 )
 
+# Waits, with a deadline, until the gateway is ready: the unauthenticated
+# `/health` probe answers 200 (`ready: true`), not merely `/live`. A data plane
+# is ready only once it holds its first configuration from the control plane.
 wait_for() {
-  local port="$1" container="$2"
+  local port="$1" container="$2" status
   for _attempt in $(seq 1 90); do
-    if curl --silent --show-error --output /dev/null "http://127.0.0.1:${port}/live"; then
+    status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${port}/health" || true)"
+    if [ "$status" = 200 ]; then
       return 0
     fi
     sleep 2
   done
   docker logs "$container" || true
-  echo "the ${container} admin API never answered on ${port}" >&2
+  echo "the ${container} gateway was not ready on ${port} within 180s (last /health: ${status:-none})" >&2
   return 1
 }
 

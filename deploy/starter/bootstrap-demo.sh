@@ -40,9 +40,6 @@ FERRUM_NAMESPACE=ferrum-foundry-demo
 FERRUM_TRUSTED_PROXY_SECRET=${proxy_secret}
 FERRUM_BASIC_AUTH_HMAC_SECRET=${basic_auth_secret}
 FERRUM_ENABLE_HSTS=false
-# The demo is plain HTTP on loopback; Secure cookies would not be kept by
-# Safari and WebKit there. Never set this for a deployment behind HTTPS.
-FERRUM_SECURE_COOKIES=false
 FOUNDRY_DEMO_PORT=${FOUNDRY_DEMO_PORT:-8088}
 FERRUM_DEMO_PROXY_PORT=${FERRUM_DEMO_PROXY_PORT:-8000}
 FERRUM_DEMO_ADMIN_PORT=${FERRUM_DEMO_ADMIN_PORT:-9000}
