@@ -1,6 +1,8 @@
 import { appendFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import { signAdminJwt } from '../../shared/admin-jwt.js';
+import { collectBoundedPages } from '../../src/api/pagination.js';
+import type { PaginatedResponse } from '../../src/api/types.js';
 
 /** Resources seeded per collection; the measured envelope in docs/compatibility.md. */
 const RECORDS = Number(process.env.FERRUM_SCALE_RECORDS ?? 1000);
@@ -62,25 +64,37 @@ it.runIf(process.env.FERRUM_SCALE_GATEWAY_CONTRACT === 'true')(
     };
 
     const measurements: Measurement[] = [];
-    async function read(label: string, paths: string[]) {
-      const started = performance.now();
-      let bytes = 0;
-      const bodies: unknown[] = [];
-      for (const path of paths) {
-        const response = await app.inject({ method: 'GET', url: `/api/proxy${path}`, headers });
-        expect(response.statusCode, `${path}: ${response.body.slice(0, 300)}`).toBe(200);
-        bytes += response.rawPayload.byteLength;
-        bodies.push(response.json());
-      }
-      measurements.push({
-        read: label, requests: paths.length, bytes, ms: Math.round(performance.now() - started),
-      });
-      return bodies as Array<{ data: Array<{ id: string }>; pagination: { total: number } }>;
+    type Row = { id: string };
+    let requests = 0;
+    let bytes = 0;
+    async function get<T>(path: string): Promise<T> {
+      const response = await app.inject({ method: 'GET', url: `/api/proxy${path}`, headers });
+      expect(response.statusCode, `${path}: ${response.body.slice(0, 300)}`).toBe(200);
+      requests += 1;
+      bytes += response.rawPayload.byteLength;
+      return response.json() as T;
     }
-    const pages = (collection: string) => Array.from(
-      { length: Math.ceil(RECORDS / TRAVERSAL_PAGE) },
-      (_, index) => `/${collection}?offset=${index * TRAVERSAL_PAGE}&limit=${TRAVERSAL_PAGE}`,
-    );
+    async function measure<T>(label: string, read: () => Promise<T>): Promise<T> {
+      requests = 0;
+      bytes = 0;
+      const started = performance.now();
+      const result = await read();
+      measurements.push({ read: label, requests, bytes, ms: Math.round(performance.now() - started) });
+      return result;
+    }
+    /**
+     * The traversal the UI uses for a complete collection
+     * (`collectBoundedPages`, pages of 250, offsets from what each page
+     * returned, refusing a repeated id or a shifting total), over the BFF.
+     */
+    function traverse(collection: string) {
+      return collectBoundedPages<Row>(
+        (offset, limit) => get<PaginatedResponse<Row>>(`/${collection}?offset=${offset}&limit=${limit}`),
+        { pageSize: TRAVERSAL_PAGE, identity: (row) => row.id },
+      );
+    }
+    const sorted = (ids: string[]) => [...ids].sort();
+    const seededIds = (prefix: string) => sorted(Array.from({ length: RECORDS }, (_, index) => `${prefix}-${index}`));
 
     try {
       const registered = await admin('/namespaces', 'POST', { name: namespace });
@@ -103,16 +117,23 @@ it.runIf(process.env.FERRUM_SCALE_GATEWAY_CONTRACT === 'true')(
       expect([200, 201], seeded.text.slice(0, 1000)).toContain(seeded.status);
       const seedMs = Math.round(performance.now() - seedStarted);
 
-      const [first] = await read('Proxy list, first page', [`/proxies?offset=0&limit=${LIST_PAGE}`]);
-      expect(first.pagination.total).toBe(RECORDS);
+      const first = await measure('Proxy list, first page', () =>
+        get<PaginatedResponse<Row>>(`/proxies?offset=0&limit=${LIST_PAGE}`));
+      expect(first.pagination).toMatchObject({ offset: 0, total: RECORDS });
       expect(first.data).toHaveLength(LIST_PAGE);
-      const [deep] = await read('Proxy list, last page', [`/proxies?offset=${RECORDS - LIST_PAGE}&limit=${LIST_PAGE}`]);
-      expect(deep.data).toHaveLength(LIST_PAGE);
-      await read('Open one proxy', [`/proxies/scale-proxy-${RECORDS - 1}`]);
-      const proxies = await read('Every proxy (traversal)', pages('proxies'));
-      expect(new Set(proxies.flatMap((page) => page.data.map((entry) => entry.id))).size).toBe(RECORDS);
-      const upstreams = await read('Every upstream (traversal)', pages('upstreams'));
-      expect(new Set(upstreams.flatMap((page) => page.data.map((entry) => entry.id))).size).toBe(RECORDS);
+      const last = await measure('Proxy list, last page', () =>
+        get<PaginatedResponse<Row>>(`/proxies?offset=${RECORDS - LIST_PAGE}&limit=${LIST_PAGE}`));
+      expect(last.pagination).toMatchObject({ offset: RECORDS - LIST_PAGE, total: RECORDS });
+      expect(last.data).toHaveLength(LIST_PAGE);
+      const opened = await measure('Open one proxy', () => get<Row>(`/proxies/scale-proxy-${RECORDS - 1}`));
+      expect(opened.id).toBe(`scale-proxy-${RECORDS - 1}`);
+
+      const proxies = await measure('Every proxy (traversal)', () => traverse('proxies'));
+      expect(proxies).toMatchObject({ complete: true, total: RECORDS });
+      expect(sorted(proxies.items.map((row) => row.id))).toEqual(seededIds('scale-proxy'));
+      const upstreams = await measure('Every upstream (traversal)', () => traverse('upstreams'));
+      expect(upstreams).toMatchObject({ complete: true, total: RECORDS });
+      expect(sorted(upstreams.items.map((row) => row.id))).toEqual(seededIds('scale-up'));
 
       const report = {
         edge_image: process.env.FERRUM_EDGE_IMAGE ?? null,
@@ -134,8 +155,14 @@ it.runIf(process.env.FERRUM_SCALE_GATEWAY_CONTRACT === 'true')(
         ].join('\n'));
       }
     } finally {
-      await admin(`/namespaces/${namespace}?confirm=true`, 'DELETE');
-      await app.close();
+      try {
+        // A refused cascade would leave 2,000 resources on the shared job
+        // gateway, so it fails the test rather than passing silently.
+        const cleanup = await admin(`/namespaces/${namespace}?confirm=true`, 'DELETE');
+        expect([200, 204], `namespace cleanup: ${cleanup.text.slice(0, 300)}`).toContain(cleanup.status);
+      } finally {
+        await app.close();
+      }
     }
   },
   600_000,
