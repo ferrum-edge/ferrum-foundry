@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – which /admin/metrics values a gateway reports     */
 /* ------------------------------------------------------------------ */
 
-import type { AdminMetrics } from "@/api/types";
+import type { AdminMetrics } from "../api/types";
 
 /**
  * What one `/admin/metrics` response actually measures, decided from its

@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import { isGatewayHealthSnapshot } from '../../shared/health-snapshot.js';
+import { adminMetricsReporting } from '../../src/lib/adminMetricsReporting.js';
 
 /**
  * Every read a Foundry page makes, sent through the BFF as an unrestricted
@@ -159,6 +160,32 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
             failures.push(`${target.mode} ${read.page} ${read.path}: ${status} ${detail}`);
           }
           rows.push(`| ${target.mode} | ${read.page} | \`${read.path.split('?')[0]}\` | ${status} | ${note.replace(PIPE_PATTERN, '\\|')} |`);
+        }
+
+        // The Metrics page and the Dashboard hide /admin/metrics values that
+        // adminMetricsReporting calls placeholders. Hold that decision to what
+        // this gateway serves: Edge's skeleton (`empty_proxy_metrics`, used
+        // without proxy state) has no config snapshot time and a zero metrics
+        // window; a gateway with proxy state reports both.
+        const metrics = await app.inject({ method: 'GET', url: '/api/proxy/admin/metrics', headers });
+        if (metrics.statusCode === 200) {
+          const gateway = (metrics.json() as { gateway?: Record<string, unknown> }).gateway ?? {};
+          const skeleton =
+            gateway.config_last_updated_at === null && gateway.metrics_window_seconds === 0 &&
+            gateway.uptime_seconds === 0 && gateway.proxy_count === 0;
+          const reportsRuntime = adminMetricsReporting(String(gateway.mode)).reportsProxyRuntime;
+          rows.push(
+            `| ${target.mode} | Metrics | \`/admin/metrics\` placeholders | ${metrics.statusCode} | ` +
+              `${skeleton ? 'skeleton' : 'measured'}; Foundry ${reportsRuntime ? 'shows' : 'hides'} runtime values |`,
+          );
+          if (gateway.mode !== target.mode) {
+            failures.push(`${target.mode} /admin/metrics: reports mode ${String(gateway.mode)}`);
+          } else if (skeleton === reportsRuntime) {
+            failures.push(
+              `${target.mode} /admin/metrics: the gateway serves ${skeleton ? 'the no-proxy-state skeleton' : 'measured runtime values'}, ` +
+                `but adminMetricsReporting ${reportsRuntime ? 'shows' : 'hides'} them`,
+            );
+          }
         }
       } finally {
         await app.close();
