@@ -1430,8 +1430,8 @@ export const server = createServer(async (req, res) => {
       enabled: true, instance_count: 1, snapshot_finalizations_pending: 0,
       snapshot_finalizations_pending_bytes: 0, snapshot_finalizations_oldest_age_secs: 0,
       snapshot_finalization_recovery_policy: 'replay',
-      totals: { queue: { depth: 3, capacity: 10000, full_drops_total: 0 }, spool: { files: 0, bytes: 0, drops_total: 0, available: true }, export: { events_enqueued_total: 431875, events_exported_total: 431872, failures_total: 0 } },
-      instances: [{ plugin_config_id: 'plg-sink', generation: 1, mode: 'per_event', pricing_version: 'v1', clickhouse: { endpoint: 'https://clickhouse.internal:8443', database: 'ferrum', table: 'charges_raw' }, batch: { size: 500, flush_interval_ms: 2000 }, retry: {}, queue: { depth: 3, capacity: 10000 }, spool: { enabled: true, available: true }, export: { events_exported_total: 431872, failures_total: 0, last_success_at: ago(1) } }],
+      totals: { per_event: { received_total: 431875, persisted_total: 431872, dropped_total: 0, pending: 3 }, queue: { depth: 3, capacity: 10000, full_drops_total: 0 }, spool: { files: 0, bytes: 0, drops_total: 0, available: true }, export: { events_enqueued_total: 431875, events_exported_total: 431872, failures_total: 0 } },
+      instances: [{ plugin_config_id: 'plg-sink', generation: 1, mode: 'per_event', pricing_version: 'v1', clickhouse: { endpoint: 'https://clickhouse.internal:8443/redacted', database: 'ferrum', table: 'charges_raw' }, batch: { size: 500, flush_interval_ms: 2000 }, retry: {}, queue: { depth: 3, capacity: 10000 }, spool: { enabled: true, available: true }, export: { events_exported_total: 431872, failures_total: 0, last_success_at: ago(1) } }],
     });
   }
 

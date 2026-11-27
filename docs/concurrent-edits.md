@@ -823,11 +823,15 @@ precondition, strong comparison, and `400` for a malformed header or for
 without a gateway. Its tag is an unkeyed digest; Edge keys its tag so it cannot
 be used to test guesses of a redacted value.
 
-## Still open
+## Known limitations (1.0)
+
+These are deliberate, bounded limits of the 1.0 write guard:
 
 - **Untagged writes outside the guard.** A cached read cannot establish an
   atomic guard: Edge cannot tag a cache that may lag the database. Adopted
   policy #542 refuses guarded writes from it; explicitly unguarded operations
-  and membership plans retain their existing untagged behavior.
-- **A browser-level two-session journey.** Not yet in the critical-journey
-  suite (`e2e/journeys`).
+  and membership plans keep their untagged behavior, as described in
+  [Without a tag](#without-a-tag).
+- **No browser-level two-session journey.** Concurrent edits are covered by
+  the unit and component tests and the gateway contract listed above, not by
+  a two-browser journey in the critical-journey suite (`e2e/journeys`).

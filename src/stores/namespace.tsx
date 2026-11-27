@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { NamespaceScope } from "@/api/client";
 import { useAuth } from "@/stores/auth";
+import { isNamespaceName } from "../../shared/namespace.js";
 
 /**
  * Namespace binding rule
@@ -62,10 +63,16 @@ const NamespaceContext = createContext<NamespaceContextValue | null>(null);
 export const NAMESPACE_STORAGE_KEY = "ferrum:namespace";
 export const DEFAULT_NAMESPACE = "ferrum";
 
+/**
+ * The stored preference, when it is still a name Edge accepts. Anything else
+ * (blank, a value from an older build, a hand-edited key) falls back to the
+ * default, which the grant-based resolution below may still replace; an
+ * invalid name would otherwise be sent as `X-Ferrum-Namespace` and refused.
+ */
 function loadPersistedNamespace(): string {
   try {
     const stored = localStorage.getItem(NAMESPACE_STORAGE_KEY);
-    return stored && stored.length > 0 ? stored : DEFAULT_NAMESPACE;
+    return isNamespaceName(stored) ? stored : DEFAULT_NAMESPACE;
   } catch {
     return DEFAULT_NAMESPACE;
   }

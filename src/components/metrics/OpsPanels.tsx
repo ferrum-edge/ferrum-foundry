@@ -6,8 +6,15 @@ import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "./StatCard";
 import { MetricsSampleTime } from "./MetricsSampleTime";
 
-import type { PressureGauge } from "@/api/ops";
-import { useOverload, useRuntimeMetrics, useCharges } from "@/hooks/useOps";
+import type { ChargebackSinkStatusResponse, PressureGauge } from "@/api/ops";
+import {
+  useOverload,
+  useRuntimeMetrics,
+  useCharges,
+  useChargebackSinkStatus,
+} from "@/hooks/useOps";
+import { formatDateTime } from "@/lib/format";
+import { isReadDenied, ReadDeniedNotice } from "@/components/shared/ReadState";
 
 interface RefreshPolicy { refetchInterval?: number | false; }
 
@@ -259,6 +266,157 @@ export function ChargesPanel({ refetchInterval }: RefreshPolicy = {}) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ---------- Chargeback sink delivery ---------- */
+
+function count(value: number | undefined): string {
+  return value == null ? "—" : value.toLocaleString();
+}
+
+/**
+ * Recorded loss or a condition the operator must act on, from the sink's
+ * process-lifetime totals. Cumulative counters survive recovery, so a
+ * finding is history to reconcile, not necessarily a current failure.
+ */
+export function chargebackSinkFindings(status: ChargebackSinkStatusResponse): string[] {
+  const { totals } = status;
+  const findings: string[] = [];
+  // `totals.spool.available` is false whenever no live instance enables a
+  // spool (Edge reports `spool_enabled_any && spool_all_available`), and an
+  // instance's `available` is false whenever its spool is disabled. Only an
+  // enabled spool that is unavailable is a storage fault.
+  const unwritable = status.instances.filter(
+    (instance) => instance.spool.enabled === true && instance.spool.available === false,
+  ).length;
+  if (unwritable > 0) {
+    findings.push(`Spool storage is not writable on ${count(unwritable)} spool-enabled instance${unwritable === 1 ? "" : "s"}`);
+  }
+  // Counts ClickHouse delivery failures and local snapshot spool handoff
+  // failures alike; each instance's last failure reason says which.
+  if ((totals.export.failures_total ?? 0) > 0) findings.push(`${count(totals.export.failures_total)} sink delivery failures`);
+  if (totals.per_event.dropped_total > 0) findings.push(`${count(totals.per_event.dropped_total)} charge rows dropped before acknowledgement or spooling`);
+  if ((totals.queue.full_drops_total ?? 0) > 0) findings.push(`${count(totals.queue.full_drops_total)} events dropped on a full queue`);
+  if ((totals.spool.drops_total ?? 0) > 0) findings.push(`${count(totals.spool.drops_total)} spool drops`);
+  if ((totals.spool.dead_letter_rows_total ?? 0) > 0) findings.push(`${count(totals.spool.dead_letter_rows_total)} rows dead-lettered as permanently rejected`);
+  if ((totals.spool.unbound_files ?? 0) > 0) findings.push(`${count(totals.spool.unbound_files)} spool records not bound to a live destination (never replayed automatically)`);
+  if (status.snapshot_finalizations_pending > 0) {
+    findings.push(`${count(status.snapshot_finalizations_pending)} snapshot finalizations pending recovery`);
+  }
+  return findings;
+}
+
+/**
+ * Read-only `api_chargeback_sink` delivery status (`GET /charges/sink/status`).
+ * Like the chargeback totals it is fleet-global, so it lives on the Metrics
+ * page that `FleetViewGate` withholds from namespace-scoped sessions.
+ */
+export function ChargebackSinkPanel({ refetchInterval }: RefreshPolicy = {}) {
+  const { data, error, isLoading, isError, dataUpdatedAt } = useChargebackSinkStatus(refetchInterval);
+
+  if (isLoading) return <p className="text-text-muted text-sm">Loading…</p>;
+  // A 403 is an authorization denial, never "unavailable" or an idle sink.
+  if (isError && isReadDenied(error)) return <ReadDeniedNotice label="Chargeback sink status" />;
+  if (isError || !data)
+    return (
+      <>
+        <MetricsSampleTime timestamp={dataUpdatedAt} />
+        <p className="text-text-muted text-sm">
+          Sink delivery status unavailable. The latest api_chargeback_sink status could not be retrieved.
+        </p>
+      </>
+    );
+
+  const findings = chargebackSinkFindings(data);
+  const findingList = findings.length > 0 && (
+    <div className="space-y-1" role="status">
+      <h4 className="text-text-secondary text-xs font-medium">Recorded since the gateway process started</h4>
+      <ul className="list-disc pl-5 text-xs text-warning space-y-0.5">
+        {findings.map((finding) => <li key={finding}>{finding}</li>)}
+      </ul>
+      {data.snapshot_finalizations_pending > 0 && (
+        <p className="text-xs text-text-muted">{data.snapshot_finalization_recovery_policy}</p>
+      )}
+    </div>
+  );
+
+  if (data.instance_count === 0) {
+    return (
+      <div className="space-y-3">
+        <MetricsSampleTime timestamp={dataUpdatedAt} />
+        <p className="text-text-muted text-sm">No api_chargeback_sink instance is live on this gateway.</p>
+        {findingList}
+      </div>
+    );
+  }
+
+  const queue = data.totals.queue;
+  return (
+    <div className="space-y-4">
+      <MetricsSampleTime timestamp={dataUpdatedAt} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 2xl:grid-cols-4 gap-3">
+        <StatCard label="Live instances" value={data.instance_count} />
+        <StatCard label="Queue" value={queue.capacity ? `${count(queue.depth)} / ${count(queue.capacity)}` : count(queue.depth)} />
+        <StatCard label="Rows exported" value={count(data.totals.export.events_exported_total)} />
+        <StatCard label="Rows pending" value={count(data.totals.per_event.pending)} />
+      </div>
+      {findingList || (
+        <p className="text-xs text-text-muted">No export failure, drop, dead letter, or unbound spool record recorded since the gateway process started.</p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-text-secondary text-xs border-b border-border">
+              <th className="text-left py-2 pr-4 font-medium">Plugin config</th>
+              <th className="text-left py-2 pr-4 font-medium">Mode</th>
+              <th className="text-left py-2 pr-4 font-medium">ClickHouse</th>
+              <th className="text-left py-2 pr-4 font-medium">Spool</th>
+              <th className="text-left py-2 font-medium">Last export</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.instances.map((instance) => (
+              <tr key={instance.plugin_config_id} className="border-b border-border/50 align-top">
+                <td className="py-2 pr-4 text-text-primary font-mono text-xs">{instance.plugin_config_id}</td>
+                <td className="py-2 pr-4 text-text-primary text-xs">{instance.mode.replace("_", "-")}</td>
+                <td className="py-2 pr-4 text-xs">
+                  <span className="font-mono text-text-primary">{instance.clickhouse.endpoint ?? "—"}</span>
+                  {instance.clickhouse.table && (
+                    <span className="block text-text-muted">
+                      {instance.clickhouse.database ? `${instance.clickhouse.database}.` : ""}{instance.clickhouse.table}
+                    </span>
+                  )}
+                </td>
+                <td className="py-2 pr-4 text-xs">
+                  {instance.spool.enabled === false ? (
+                    <Badge variant="default">disabled</Badge>
+                  ) : instance.spool.available === false ? (
+                    <Badge variant="red">unavailable</Badge>
+                  ) : (
+                    <Badge variant="green">available</Badge>
+                  )}
+                </td>
+                <td className="py-2 text-xs">
+                  <span className="block text-text-primary">
+                    {instance.export.last_success_at ? `Succeeded ${formatDateTime(instance.export.last_success_at)}` : "No success recorded"}
+                  </span>
+                  {instance.export.last_failure_at && (
+                    <span className="block text-danger">
+                      Failed {formatDateTime(instance.export.last_failure_at)}
+                      {instance.export.last_failure_reason ? `: ${instance.export.last_failure_reason}` : ""}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-text-muted">
+        Instance values cover each plugin configuration&apos;s current generation; totals are cumulative for the gateway process and reset when it restarts.
+      </p>
     </div>
   );
 }

@@ -26,6 +26,7 @@ import {
   OverloadPanel,
   RuntimePanel,
   ChargesPanel,
+  ChargebackSinkPanel,
 } from "@/components/metrics/OpsPanels";
 import {
   getStoredMetricsRefreshInterval,
@@ -41,6 +42,9 @@ import { adminMetricsReporting } from "@/lib/adminMetricsReporting";
 
 // The fleet-wide routes this page reads are refused to a session holding
 // namespace grants, so such a session gets the reason instead of the page.
+/** The independently polled operational panels the refresh control drives. */
+const OPS_QUERY_KEYS = ["overload", "runtimeMetrics", "charges", "chargebackSink"];
+
 export default function MetricsPage() {
   return (
     <FleetViewGate view="metrics" title="Metrics">
@@ -57,7 +61,7 @@ function MetricsWorkspace() {
   const queryClient = useQueryClient();
   const opsInterval = refreshInterval > 0 ? refreshInterval : false;
   const isOpsFetching = useIsFetching({ predicate: (query) =>
-    ["overload", "runtimeMetrics", "charges"].includes(String(query.queryKey[0])),
+    OPS_QUERY_KEYS.includes(String(query.queryKey[0])),
   }) > 0;
 
   const adminMetricsQuery = useAdminMetrics(refreshInterval);
@@ -103,7 +107,7 @@ function MetricsWorkspace() {
       refetchAdminMetrics({ cancelRefetch: false }),
       refetchPrometheusMetrics({ cancelRefetch: false }),
       queryClient.refetchQueries({ type: "active", predicate: (query) =>
-        ["overload", "runtimeMetrics", "charges"].includes(String(query.queryKey[0])),
+        OPS_QUERY_KEYS.includes(String(query.queryKey[0])),
       }, { cancelRefetch: false }),
     ]);
   };
@@ -277,6 +281,12 @@ function MetricsWorkspace() {
             API Chargeback
           </h3>
           <ChargesPanel refetchInterval={opsInterval} />
+        </Card>
+        <Card>
+          <h3 className="text-sm font-semibold text-text-primary mb-3">
+            Chargeback Sink Delivery
+          </h3>
+          <ChargebackSinkPanel refetchInterval={opsInterval} />
         </Card>
       </div>
 

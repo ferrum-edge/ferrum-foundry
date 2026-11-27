@@ -329,6 +329,9 @@ const REPLACED = new Set([
   "Upload the hosted schema producer export",
   "Verify the plugin sensitivity table against the pinned Edge source",
   "Verify the server-owned subset traffic_policy fields against the pinned Edge spec",
+  // Coverage classifies the pinned release's operations; Edge main may add
+  // routes Foundry has not classified yet without that being drift.
+  "Verify the Admin API coverage table against the pinned Edge spec",
   "Resolve the pinned Ferrum Edge image",
 ]);
 const USES_ONLY = new Set(["Setup Node.js"]);

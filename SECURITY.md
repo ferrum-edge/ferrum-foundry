@@ -2,14 +2,21 @@
 
 ## Supported versions
 
+From 1.0.0 onward:
+
 | Version | Supported |
 |---|---|
-| Latest minor release line | Yes, security fixes |
+| Newest 1.x minor release line | Yes: security fixes, published as a patch of that line |
+| Older 1.x minor release lines | No |
+| 0.x releases | No, once 1.0.0 is published (until then, the newest 0.5.x patch) |
 | `main` | Yes, fixes land here first |
-| Any older minor release line | No |
 
-Security fixes are published on the newest minor release line. Upgrade to the
-latest patch of that line to receive them. Older lines do not receive backports.
+Upgrade to the latest patch of the newest 1.x minor line to receive fixes.
+Within 1.x a minor upgrade does not break the stable surface in the
+[compatibility policy](README.md#compatibility-policy), so older minor lines do
+not receive backports. A fix that must break a stable item says so in its
+release notes. Each release supports only the Ferrum Edge release it is
+qualified with ([supported pairing](docs/compatibility.md)).
 
 ## Reporting a vulnerability
 

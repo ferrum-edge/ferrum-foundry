@@ -186,6 +186,14 @@ jobs:
         # makes every upstream save that read it fail with 400.
         run: npm run check:subset-traffic-policy
 
+      - name: Verify the Admin API coverage table against the pinned Edge spec
+        # docs/admin-api-coverage.md classifies every operation in Edge's
+        # openapi.yaml (used by the UI, forwarded but unused, or denied by the
+        # BFF). This fetches the spec at edge.source_commit, checks the digest
+        # the table records, and fails when the spec has an operation the
+        # table does not classify, or the table lists one Edge no longer serves.
+        run: npm run check:admin-api-coverage
+
       - name: Resolve the pinned Ferrum Edge image
         # edge.image in docs/compatibility.json is the single source for the
         # gateway Foundry is qualified against; the starter and docs are

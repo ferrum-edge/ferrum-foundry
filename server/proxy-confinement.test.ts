@@ -449,10 +449,9 @@ describe('raw BFF path confinement', () => {
     }
   });
 
-  it('forwards backups and masked exports, and refuses unrelated routes at the namespace ceiling', async () => {
+  it('forwards backups, and refuses unrelated routes at the namespace ceiling', async () => {
     for (const path of [
       '/backup?note=/deployment-snapshot',
-      '/config/export?note=%2Fdeployment-snapshot',
       '/proxies/deployment-snapshot',
     ]) {
       const beforeArrivals = arrivals.length;
@@ -472,6 +471,9 @@ describe('raw BFF path confinement', () => {
       '/deployment-snapshot/extra',
       '/deployment-snapshots',
       '/admin/deployment-snapshot',
+      // Namespace-scoped in Edge, unused by Foundry, so withheld.
+      '/config/export?note=%2Fdeployment-snapshot',
+      '/backend-egress-policy',
     ]) {
       const response = await rawRequest(`/api/proxy${path}`, 'GET', identity('admin'));
       expect(response.status, path).toBe(403);
@@ -681,7 +683,7 @@ describe('raw BFF path confinement', () => {
       ['GET', '/charges?format=json'], ['GET', '/charges/sink/status'],
       ['GET', '/backend-capabilities'], ['POST', '/backend-capabilities/refresh'],
       ['GET', '/mesh/service-graph'], ['POST', '/mesh/egress-scope/test'],
-      ['POST', '/mesh/config-revision/reset'], ['GET', '/node-waypoint/identities'],
+      ['GET', '/node-waypoint/identities'],
       ['GET', '/service-waypoint/services'], ['GET', '/overload'],
       ['GET', '/diagnostics/v1/refs/fd1_00'],
     ]) {
@@ -698,6 +700,7 @@ describe('raw BFF path confinement', () => {
     for (const [method, path] of [
       ['GET', '/cluster'], ['GET', '/overload'], ['POST', '/admin/tls/rotate/all'],
       ['PUT', '/admin/tls/certificates/cert-1'], ['POST', '/admin/tls/acme/orders/order-1/finalize'],
+      ['GET', '/config/export'], ['POST', '/batch'], ['GET', '/charges/sink/status'],
     ]) {
       const beforeTokens = vi.mocked(generateToken).mock.calls.length;
       const response = await rawRequest(`/api/proxy${path}`, method, globalAdmin(), method === 'GET' ? '' : '{}');
@@ -708,6 +711,30 @@ describe('raw BFF path confinement', () => {
       expect(claims).toMatchObject({ sub: 'path-test-user', role: 'admin' });
       expect(claims).not.toHaveProperty('ns');
     }
+  });
+
+  it('refuses the mesh config revision reset to every session before signing or fetch', async () => {
+    const beforeArrivals = arrivals.length;
+    const beforeTokens = vi.mocked(generateToken).mock.calls.length;
+    const beforeFetches = vi.mocked(upstreamFetch).mock.calls.length;
+    const paths = [
+      '/api/proxy/mesh/config-revision/reset?confirm=true',
+      '/api/proxy/mesh/config-revision/reset/',
+      '/api/proxy/mesh/%63onfig-revision/reset?confirm=true',
+    ];
+    for (const headers of [identity('admin'), identity('operator'), globalAdmin()]) {
+      for (const method of ['POST', 'GET', 'PUT', 'DELETE']) {
+        for (const path of paths) {
+          const response = await rawRequest(path, method, headers, method === 'GET' || method === 'DELETE' ? '' : '{}');
+          expect(response.status, `${method} ${path}`).toBe(403);
+          expect(response.wire).toContain('FERRUM_BFF_ROUTE_NOT_EXPOSED');
+          expect(response.wire).not.toContain('Namespace access denied');
+        }
+      }
+    }
+    expect(arrivals).toHaveLength(beforeArrivals);
+    expect(vi.mocked(generateToken).mock.calls).toHaveLength(beforeTokens);
+    expect(vi.mocked(upstreamFetch).mock.calls).toHaveLength(beforeFetches);
   });
 
   it('forwards only the credential methods Edge serves to scoped principals', async () => {

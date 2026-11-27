@@ -80,7 +80,7 @@ to the paired Edge release are checked by
 [Plugin configuration templates](docs/plugin-defaults.md#shared-plugin-catalog-contract).
 Foundry adopts only the 37 files listed in its pin: it does not vendor the
 deployment-snapshot or backend-egress-policy schemas or adopt the native
-deployment profile, and diagnostic import remains future work. The pin's
+deployment profile, and it has no diagnostic import (a 1.0 limitation). The pin's
 release and qualification evidence are in the
 [pairing record](docs/compatibility.md#qualification-evidence).
 The [Alloy manifest preview](docs/alloy-manifest-preview.md) consumes
@@ -89,16 +89,62 @@ the existing fields through an authenticated, read-only BFF route.
 A shared contract changes in `ferrum-contracts` first, then is re-vendored here;
 never edit a vendored file locally.
 
-## Development status
+## Compatibility policy
 
-Ferrum Foundry is in active buildout and has no users yet. Expect breaking
-changes; earlier development versions get no compatibility or upgrade path.
-When a contract changes, update the code, tests, demo data, and docs together.
+From 1.0.0 onward, Foundry follows [Semantic Versioning](https://semver.org/)
+for the surface below: a 1.x minor or patch release does not break it, and an
+incompatible change to it waits for 2.0.0. Releases before 1.0.0 had no such
+promise, and none of their behavior carries over unless it is listed here.
 
-Foundry has no database, SQL schema, or migrations. Gateway data and its schema
-belong to Ferrum Edge. If Foundry ever adds its own database during buildout,
-keep one canonical initial schema instead of a chain of migrations. Revisit
-this policy before onboarding users.
+**Stable from 1.0.0:**
+
+- **Deployment configuration.** Every environment variable in the
+  [configuration reference](docs/deployment.md#2-configuration-reference): its
+  name, meaning, default and accepted values. The trusted-proxy identity
+  contract (the headers the proxy strips and injects, the shared proof secret,
+  and how role and namespace grants are read; see
+  [authentication](docs/authentication.md)), and the `/api/` path prefix the
+  [reverse proxy example](docs/deployment.md#3-reverse-proxy-example-nginx-and-oauth2-proxy)
+  keys on. The container image's `PORT`, non-root user and health check, and
+  the image tag scheme in
+  [Upgrade and rollback](docs/deployment.md#upgrade-and-rollback).
+- **The BFF's public endpoints:** `GET /api/health`, `GET /api/health/live`
+  and `GET /api/health/ready`, as documented in
+  [Health endpoints](docs/deployment.md#health-endpoints). The other `/api/*`
+  routes (sign-in, session, settings, the Alloy preview and `/api/proxy/*`)
+  are the private contract between the BFF and the browser app shipped in the
+  same image, and may change in any release.
+- **Persisted state.** Foundry keeps no durable state of its own: no database,
+  schema, migration runner or data files. Sessions, runtime settings and
+  upload or read permits live in process memory and end with the process;
+  gateway data and its schema belong to Ferrum Edge. The browser keeps a few
+  per-browser preferences in `localStorage` (theme, last namespace, Metrics
+  refresh interval, the last request-rate sample) and one tab-scoped
+  `sessionStorage` value; each is validated when read and falls back to its
+  default, so a release may reset one but never fails on one. Upgrading to
+  1.0.0 needs no migration. If Foundry ever adds durable state, it will ship a
+  frozen baseline schema with forward-only migrations and a test that state
+  written by the previous release opens after the upgrade.
+- **The supported Edge pairing rule.** Each Foundry release is qualified
+  against exactly one published Ferrum Edge release, recorded as
+  `edge.release` in [`docs/compatibility.json`](docs/compatibility.json) and
+  described in [Supported pairing](docs/compatibility.md). Only that pairing is
+  supported. Moving to another Edge release is a full re-qualification and
+  ships in a Foundry release.
+
+**Not covered:** the UI's layout, wording and navigation; the private `/api/*`
+routes; the [Admin API operations](docs/admin-api-coverage.md) Foundry does not
+use; the mock gateway, demo and helper scripts in `scripts/`; and CI.
+
+**Deprecation.** A stable item that must change incompatibly is first marked
+deprecated in a 1.x minor release, in `CHANGELOG.md` and in the documentation
+that describes it, with its replacement. It keeps working for the rest of the
+1.x line and is removed no earlier than 2.0.0. A security fix may break a
+stable item sooner when keeping it would leave users exposed; the release notes
+then say so. Supported versions are in [SECURITY.md](SECURITY.md).
+
+Gateway data and its schema belong to Ferrum Edge. Do not add a Foundry
+database or copy Edge's schema or migrations into this repository.
 
 ## Features
 
@@ -124,7 +170,8 @@ this policy before onboarding users.
   as a unit.
 - **Metrics**: gateway stats, overload protection, host runtime, circuit
   breakers, connection pools, health checks, load balancers, caches, API
-  chargeback, Prometheus, and per-route metrics, under one refresh policy.
+  chargeback and `api_chargeback_sink` delivery status, Prometheus, and
+  per-route metrics, under one refresh policy.
   Each panel shows when its own data was last fetched.
 - **Operations**: audit log with filters and redacted diffs, CP/DP cluster
   topology, backend protocol capability probes, and full configuration backup
@@ -432,6 +479,7 @@ image with a different digest. See
 - [Production authentication](docs/authentication.md): trusted-proxy identity contract and downstream JWT claims
 - [Operator visibility](docs/operator-visibility.md): health and audit evidence, proxy-bound specs, mesh runtime
 - [Supported pairing](docs/compatibility.md): the qualified Ferrum Edge image, tested envelope, best-effort and unqualified modes
+- [Admin API coverage](docs/admin-api-coverage.md): every Ferrum Edge admin API operation, and whether Foundry uses, forwards or denies it
 - [MCP Tools tab](docs/mcp-tools.md): the node-local MCP tool catalog, per-tool policy edits, and per-group grants
 - [Critical journeys](e2e/README.md): the browser-to-gateway release gate and how to run it locally
 - [Release and supply-chain gates](docs/release-security.md): publication gates, image tags, provenance and SBOM

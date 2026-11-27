@@ -233,6 +233,118 @@ export async function getCharges(
     .json<ChargebackResponse>();
 }
 
+/* ---------- Chargeback sink delivery status ---------- */
+
+/**
+ * Per-event row accounting at bounded admission. At a settled observation
+ * `received_total` equals persisted plus dropped plus pending.
+ */
+export interface ChargebackSinkEventAccounting {
+  received_total: number;
+  persisted_total: number;
+  dropped_total: number;
+  pending: number;
+}
+
+export interface ChargebackSinkQueueStatus {
+  outstanding?: number;
+  depth?: number;
+  capacity?: number;
+  high_water_hits_total?: number;
+  high_water_diversions_total?: number;
+  full_drops_total?: number;
+  retained_bytes?: number;
+  buffer_max_bytes?: number;
+  byte_budget_exhausted_total?: number;
+}
+
+export interface ChargebackSinkSpoolTotals {
+  files?: number;
+  bytes?: number;
+  drops_total?: number;
+  prepare_failures_total?: number;
+  replay_attempts_total?: number;
+  dead_letter_rows_total?: number;
+  unbound_files?: number;
+  unbound_namespaces?: number;
+  available?: boolean;
+}
+
+export interface ChargebackSinkExportTotals {
+  events_enqueued_total?: number;
+  events_exported_total?: number;
+  failures_total?: number;
+}
+
+/** One accepted, live `api_chargeback_sink` instance (current generation). */
+export interface ChargebackSinkInstanceStatus {
+  plugin_config_id: string;
+  generation: number;
+  mode: "per_event" | "snapshot";
+  pricing_version: string;
+  /** `endpoint` is Edge's structural `scheme://host:port/redacted` form. */
+  clickhouse: { endpoint?: string; database?: string; table?: string };
+  batch: { size?: number; flush_interval_ms?: number };
+  retry: { max_attempts?: number; initial_delay_ms?: number; max_delay_ms?: number; jitter?: boolean };
+  per_event: ChargebackSinkEventAccounting;
+  queue: ChargebackSinkQueueStatus;
+  snapshot?: {
+    entries: number;
+    retained_bytes: number;
+    max_entries: number;
+    max_retained_bytes: number;
+    overflow_spooled_total: number;
+    overflow_pending_total: number;
+    cardinality_rejections_total: number;
+    recovery?: "compact";
+  };
+  spool: ChargebackSinkSpoolTotals & {
+    enabled?: boolean;
+    delivery_queue_depth?: number;
+    jobs_enqueued_total?: number;
+    jobs_written_total?: number;
+    jobs_lost_total?: number;
+    events_lost_total?: number;
+    last_replay_at?: string | null;
+  };
+  export: ChargebackSinkExportTotals & {
+    last_success_at?: string | null;
+    last_failure_at?: string | null;
+    last_failure_reason?: string | null;
+  };
+}
+
+/**
+ * `GET /charges/sink/status` (`ChargebackSinkStatusResponse` in Edge's
+ * `openapi.yaml`). Instance values describe the current accepted generation;
+ * `totals` cumulative counters cover the gateway process's lifetime,
+ * retired workers included, until it restarts.
+ */
+export interface ChargebackSinkStatusResponse {
+  enabled: boolean;
+  instance_count: number;
+  snapshot_finalizations_pending: number;
+  snapshot_finalizations_pending_bytes: number;
+  snapshot_finalizations_oldest_age_secs: number;
+  snapshot_finalization_recovery_policy: string;
+  totals: {
+    per_event: ChargebackSinkEventAccounting;
+    queue: ChargebackSinkQueueStatus;
+    spool: ChargebackSinkSpoolTotals;
+    export: ChargebackSinkExportTotals;
+  };
+  instances: ChargebackSinkInstanceStatus[];
+}
+
+/** Fleet-global and read-only: any admin role may read it; scoped sessions may not. */
+export async function getChargebackSinkStatus(
+  scope: NamespaceScope,
+): Promise<ChargebackSinkStatusResponse> {
+  return proxyApi
+    .get("charges/sink/status", scoped(scope))
+    .json<ChargebackSinkStatusResponse>();
+}
+
 /* ---------- Cluster ---------- */
 
 /**

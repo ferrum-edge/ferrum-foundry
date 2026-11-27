@@ -32,7 +32,10 @@ and [plugin documentation](https://github.com/ferrum-edge/ferrum-edge/blob/main/
 ## Templates that need operator input
 
 Eight templates need something only the operator or the gateway environment
-can supply. Seven are rejected as shipped, and the contract records each exact
+can supply. This is a deliberate 1.0 limitation: Foundry ships no placeholder
+secret, certificate or broker list that the gateway would accept, so these
+templates are starting points, not working configurations. Seven are rejected
+as shipped, and the contract records each exact
 error body and its `400` status. The eighth, `oidc_relying_party`, ships with
 an empty `session.encryption_secret` that the form requires the operator to
 fill before it can be enabled; the contract injects a fresh secret and then

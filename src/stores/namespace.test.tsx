@@ -237,6 +237,25 @@ describe("NamespaceProvider binding", () => {
     expect(displayed()).toBe(DEFAULT_NAMESPACE);
   });
 
+  it.each(["old/namespace", ".hidden", "tenant a", "tenant-a\n", "x".repeat(255)])(
+    "falls back to the default when the persisted preference %j is not a namespace name",
+    async (stored) => {
+      localStorage.setItem(NAMESPACE_STORAGE_KEY, stored);
+      await mount();
+      expect(displayed()).toBe(DEFAULT_NAMESPACE);
+      await consumers.create(latest!.scope, { username: "alice" });
+      expect(captured.map((request) => request.namespace)).toEqual([DEFAULT_NAMESPACE]);
+    },
+  );
+
+  it("applies the grant fallback after refusing an invalid persisted preference", async () => {
+    localStorage.setItem(NAMESPACE_STORAGE_KEY, "old/namespace");
+    auth.principal = { namespaces: ["tenant-b"] };
+    await mount();
+    expect(displayed()).toBe("tenant-b");
+    expect(localStorage.getItem(NAMESPACE_STORAGE_KEY)).toBe("tenant-b");
+  });
+
   it("compares against the latest selection even before a batched render", async () => {
     localStorage.setItem(NAMESPACE_STORAGE_KEY, "tenant-a");
     await mount();
