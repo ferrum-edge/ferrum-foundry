@@ -2,7 +2,7 @@
 /*  Ferrum Foundry – diagnostic reference lookup card (ADR 0001)       */
 /* ------------------------------------------------------------------ */
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -45,9 +45,20 @@ export function DiagnosticLookupCard() {
 function LookupForm({ scope }: { scope: NamespaceScope }) {
   const [ref, setRef] = useState("");
   const [inputError, setInputError] = useState<string | null>(null);
+  // One controller per lookup: editing the reference, a new lookup, or the
+  // form unmounting (a namespace switch, leaving the page) cancels the request
+  // in flight, so the BFF releases its slot instead of waiting it out.
+  const inFlight = useRef<AbortController | null>(null);
   const lookup = useMutation({
-    mutationFn: (value: string) => lookupDiagnosticRef(scope, value),
+    mutationFn: (value: string) => {
+      inFlight.current?.abort();
+      const controller = new AbortController();
+      inFlight.current = controller;
+      return lookupDiagnosticRef(scope, value, controller.signal);
+    },
   });
+  const { reset } = lookup;
+  useEffect(() => () => inFlight.current?.abort(), []);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -57,6 +68,7 @@ function LookupForm({ scope }: { scope: NamespaceScope }) {
       return;
     }
     setInputError(null);
+    reset();
     lookup.mutate(value);
   };
 
@@ -76,6 +88,10 @@ function LookupForm({ scope }: { scope: NamespaceScope }) {
             onChange={(event) => {
               setRef(event.target.value);
               setInputError(null);
+              // A result describes the reference it was looked up for; once
+              // the field changes it would read as the new one's.
+              inFlight.current?.abort();
+              reset();
             }}
             placeholder="fd1_…"
             spellCheck={false}
@@ -114,6 +130,9 @@ function LookupResult({ result }: { result: DiagnosticLookup }) {
   const detail = result.detail;
   return (
     <div className="mt-4 space-y-3" aria-label="Diagnostic reference detail">
+      <p className="text-xs text-text-secondary">
+        Reference <span className="font-mono text-text-primary break-all">{result.ref}</span>
+      </p>
       <HealthFields
         fields={[
           ["Status", result.status],

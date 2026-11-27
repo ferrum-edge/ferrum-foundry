@@ -364,7 +364,16 @@ A listed role's lookup carries one `X-Ferrum-Namespace` the session is granted
 (any valid name for an unrestricted session). The BFF signs a token for that
 one lookup: the session's subject and role, `ns` set to that namespace,
 `scope: diagnostics:read`, and a lifetime of at most 60 seconds. Ordinary
-`/api/proxy` tokens never carry the scope. Budgets, the response projection
+`/api/proxy` tokens never carry the scope. A lookup whose client goes away is
+aborted at the gateway and frees its admission slot at once.
+
+The BFF never logs a lookup's request target, and it answers a rejected one
+with a fixed body. Keep the reverse proxy in front of it from logging the
+target too: the starter's nginx profiles log `/api/diagnostics/` requests with
+the reference replaced by `[redacted]` (`$foundry_logged_request` in
+`deploy/starter/nginx/foundry.conf`), selected on the normalized `$uri`, and
+classify API requests for the sign-in refusal on `$uri` as well, so an escaped
+prefix is never echoed into a redirect. Do the same in your own proxy. Budgets, the response projection
 and the fixed failure codes are in
 [ADR 0001](adr/0001-alloy-authenticated-presentation.md#implemented-slice).
 

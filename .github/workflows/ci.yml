@@ -415,6 +415,33 @@ jobs:
           set +a
           node ../../scripts/starter-journey.mjs
 
+      - name: Keep diagnostic lookup targets out of the starter's logs and redirects
+        # A mistaken client can put a credential in a lookup path. Neither the
+        # proxy's access log, the BFF's log, nor a sign-in redirect may carry
+        # it, including with an escaped API prefix and without a session.
+        working-directory: deploy/starter
+        run: |
+          set -euo pipefail
+          sentinel="foundry-ci-sentinel-${GITHUB_RUN_ID}-${RANDOM}${RANDOM}"
+          signed_in="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header 'X-Demo-Identity: admin' \
+            "http://127.0.0.1:8088/api/diagnostics/refs/https%3A%2F%2Fuser%3A${sentinel}%40elsewhere.test?token=${sentinel}")"
+          test "$signed_in" = 403 || test "$signed_in" = 400
+          for target in "/api/diagnostics/refs/${sentinel}" "/%61pi/diagnostics/refs/${sentinel}"; do
+            headers="$(curl --silent --output /dev/null --dump-header - "http://127.0.0.1:8088${target}")"
+            echo "$headers" | head -1 | grep -q ' 401'
+            if echo "$headers" | grep -qi "$sentinel"; then
+              echo "an unauthenticated lookup echoed its target" >&2
+              exit 1
+            fi
+          done
+          docker compose --profile demo logs --no-color > "${RUNNER_TEMP}/starter.log"
+          if grep -q "$sentinel" "${RUNNER_TEMP}/starter.log"; then
+            echo "a diagnostic lookup target reached the starter's logs:" >&2
+            grep "$sentinel" "${RUNNER_TEMP}/starter.log" | head -5 >&2
+            exit 1
+          fi
+
       - name: Show stack logs on failure
         if: failure()
         working-directory: deploy/starter

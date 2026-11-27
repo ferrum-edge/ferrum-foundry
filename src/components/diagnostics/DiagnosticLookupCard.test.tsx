@@ -115,6 +115,34 @@ describe("diagnostic reference lookup", () => {
     expect(text).toContain("pre wire failure");
   });
 
+  it("labels a result with its reference and drops it once the field changes", async () => {
+    await ui.render(<DiagnosticLookupCard />);
+    await settle(() => expect(ui.host.textContent).toContain("namespace tenant-a"));
+    await submit(REF);
+    await settle(() => expect(ui.host.textContent).toContain("orders-api"));
+    expect(ui.host.textContent).toContain(`Reference ${REF}`);
+    await fill(inputByLabel(ui.host, "Diagnostic reference"), `${REF.slice(0, -1)}x`);
+    expect(ui.host.textContent).not.toContain("orders-api");
+    expect(ui.host.textContent).not.toContain(`Reference ${REF}`);
+  });
+
+  it("cancels a lookup in flight when the field changes", async () => {
+    const signals: AbortSignal[] = [];
+    stubFetch(async (request) => {
+      requests.push(request);
+      const path = new URL(request.url).pathname;
+      if (path === "/api/diagnostics/config") return Response.json({ lookupPermitted: true });
+      signals.push(request.signal);
+      return new Promise<Response>(() => {});
+    });
+    await ui.render(<DiagnosticLookupCard />);
+    await settle(() => expect(ui.host.textContent).toContain("namespace tenant-a"));
+    await submit(REF);
+    await settle(() => expect(signals).toHaveLength(1));
+    await fill(inputByLabel(ui.host, "Diagnostic reference"), "fd1_");
+    await settle(() => expect(signals[0].aborted).toBe(true));
+  });
+
   it("drops the input and the answer when the namespace changes", async () => {
     await ui.render(<DiagnosticLookupCard />);
     await settle(() => expect(ui.host.textContent).toContain("namespace tenant-a"));

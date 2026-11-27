@@ -173,6 +173,9 @@ services:
       # Demo-only, so not marked required: see the note at the top of the file.
       # `bootstrap-demo.sh` always writes it.
       FERRUM_BASIC_AUTH_HMAC_SECRET: ${FERRUM_BASIC_AUTH_HMAC_SECRET}
+      # Stamp X-Ferrum-Diagnostic-Ref on gateway error responses, so the
+      # Status page lookup has something to resolve: off, errors, or all.
+      FERRUM_DIAGNOSTIC_REFS: ${FERRUM_DIAGNOSTIC_REFS:-off}
     ports:
       # The data plane, so the walkthrough can make a real request through it.
       - "127.0.0.1:${FERRUM_DEMO_PROXY_PORT:-8000}:8000"

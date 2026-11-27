@@ -1,6 +1,8 @@
 import cookie from "@fastify/cookie";
 import Fastify, { type FastifyInstance } from "fastify";
 import { decodeJwt } from "jose";
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const BEARER_PATTERN = /^Bearer /;
@@ -296,6 +298,38 @@ describe("diagnostic lookup for a listed role", () => {
       expect((await lookUp(server)).statusCode).toBe(200);
     } finally {
       for (const release of releases) release();
+    }
+  });
+
+  it("aborts the gateway request and frees the slot when the client goes away", async () => {
+    const signals: AbortSignal[] = [];
+    const held: Array<() => void> = [];
+    upstream.mockImplementation((_url: URL, init: { signal: AbortSignal }) => new Promise((resolve, reject) => {
+      signals.push(init.signal);
+      held.push(() => resolve(Response.json(lookup)));
+      init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+    }));
+    const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
+    await server.listen({ port: 0, host: "127.0.0.1" });
+    const { port } = server.server.address() as AddressInfo;
+    try {
+      // Two real connections fill the principal's share, then both leave.
+      const clients = [0, 1].map(() => {
+        const request = httpRequest({
+          host: "127.0.0.1", port, path: `/api/diagnostics/refs/${REF}`, headers,
+        });
+        request.on("error", () => undefined);
+        request.end();
+        return request;
+      });
+      await vi.waitFor(() => expect(signals).toHaveLength(2));
+      for (const client of clients) client.destroy();
+      await vi.waitFor(() => expect(signals.every((signal) => signal.aborted)).toBe(true));
+      // The slots are free again for the same principal.
+      upstream.mockImplementation(async () => Response.json(lookup));
+      await vi.waitFor(async () => expect((await lookUp(server)).statusCode).toBe(200));
+    } finally {
+      for (const release of held) release();
     }
   });
 

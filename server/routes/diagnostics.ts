@@ -424,6 +424,12 @@ const diagnosticsPlugin: FastifyPluginAsync = async (fastify) => {
       if (!admit(principal.subject)) return fail(reply, 'FERRUM_BFF_DIAGNOSTICS_CAPACITY');
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deadlineMs);
+      // A client that goes away abandons its lookup: abort the gateway request
+      // so the admission slot is released now, not at the deadline.
+      const abandon = () => {
+        if (!reply.raw.writableEnded) controller.abort();
+      };
+      reply.raw.once('close', abandon);
       try {
         const token = await signAdminJwt({
           secret: config.jwtSecret,
@@ -482,6 +488,7 @@ const diagnosticsPlugin: FastifyPluginAsync = async (fastify) => {
         return fail(reply, 'FERRUM_BFF_DIAGNOSTICS_UNAVAILABLE');
       } finally {
         clearTimeout(timer);
+        reply.raw.off('close', abandon);
         release(principal.subject);
       }
     },
