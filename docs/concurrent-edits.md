@@ -826,10 +826,18 @@ be used to test guesses of a redacted value.
 
 ## Known limitations (1.0)
 
-This is a deliberate, bounded limit of the 1.0 write guard:
+These are bounded limits of the 1.0 write guard, both set by what Edge can
+condition:
 
 - **Untagged writes outside the guard.** A cached read cannot establish an
   atomic guard: Edge cannot tag a cache that may lag the database. Adopted
   policy #542 refuses guarded writes from it; explicitly unguarded operations
   and membership plans keep their untagged behavior, as described in
   [Without a tag](#without-a-tag).
+- **Managed TLS rotation.** Edge replaces a managed TLS record whole and
+  offers no `ETag` or `If-Match` for the managed TLS store. The TLS page
+  therefore re-reads the record just before `PUT` and refuses the rotation,
+  sending nothing, when its `updated_at`, name or description differ from the
+  version the dialog opened; a change landing between that read and the `PUT`
+  cannot be detected. A lost answer is reported as an unknown outcome and is
+  never resent.

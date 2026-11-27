@@ -37,6 +37,7 @@ import { useEditorIdentity, type EditorSession } from "@/hooks/useEditorIdentity
 import { reseedAfterCommit, useEditBaseline } from "@/hooks/useEditBaseline";
 import { isStaleResourceError, type StaleResourceDetail } from "@/api/conditionalWrite";
 import { StaleWriteDialog } from "@/components/shared/StaleWriteDialog";
+import { useDraftReload } from "@/hooks/useDraftReload";
 import { useCapabilities } from "@/stores/capabilities";
 import { WriteAction } from "@/components/shared/CapabilityGate";
 import type { ProxyCreate, PluginConfig } from "@/api/types";
@@ -244,13 +245,20 @@ function ProxyEditor({ session }: { session: EditorSession }) {
     }
   });
 
-  /** Deliberate restart: drop the draft and reseed the form from the gateway. */
-  const handleDiscardAndReload = async () => {
-    setConflict(null);
-    const refreshed = await resourceQuery.refetch();
-    if (refreshed.data) baseline.adopt(refreshed.data);
-    setFormGeneration((generation) => generation + 1);
-  };
+  /**
+   * Deliberate restart: drop the draft and reseed the form from the gateway.
+   * The dialog and draft stay until the fresh read lands (`useDraftReload`).
+   */
+  const draftReload = useDraftReload();
+  const handleDiscardAndReload = () => draftReload.reload(
+    () => resourceQuery.refetch(),
+    (fresh) => {
+      baseline.adopt(fresh);
+      setFormGeneration((generation) => generation + 1);
+      setConflict(null);
+    },
+    () => toast("error", "Could not re-read the proxy; your draft was kept. Try again."),
+  );
 
   const handleDelete = session.bind(async () => {
     if (!proxy || !capability.allowed) return;
@@ -709,8 +717,12 @@ function ProxyEditor({ session }: { session: EditorSession }) {
       {/* Refused concurrent-edit save */}
       <StaleWriteDialog
         conflict={conflict}
-        onKeepEditing={() => setConflict(null)}
-        onDiscardAndReload={handleDiscardAndReload}
+        onKeepEditing={() => {
+          draftReload.abandon();
+          setConflict(null);
+        }}
+        onDiscardAndReload={() => void handleDiscardAndReload()}
+        reloading={draftReload.reloading}
       />
 
       {/* Delete confirmation */}

@@ -49,8 +49,8 @@ export function useRotateManagedTlsRecord(collection: tls.ManagedTlsCollection) 
   return useMutation({
     // Discard submitted key material as soon as the form resets/unmounts.
     gcTime: 0,
-    mutationFn: ({ id, data }: { id: string; data: tls.ManagedTlsRequest }) =>
-      tls.replaceManagedRecord(collection, id, data),
+    mutationFn: ({ id, data, basis }: { id: string; data: tls.ManagedTlsRequest; basis: tls.ManagedRecordBasis }) =>
+      tls.replaceManagedRecord(collection, id, data, basis),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tls"] });
     },
