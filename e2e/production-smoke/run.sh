@@ -372,16 +372,14 @@ verify() {
   expect_equal "admin principal" \
     "$(session_field "$admin_jar" '.principal | [.subject, .role, .namespaces, .authMode]')" \
     "[\"smoke-admin\",\"admin\",[\"$NAMESPACE\"],\"trusted-proxy\"]"
-  # The session and CSRF cookies are Secure and __Host- on the production
-  # profile, although `up` ran with FERRUM_SECURE_COOKIES=false exported.
-  # The jar holds only oauth2-proxy's cookie, so Foundry opens a session.
+  # Behind the identity proxy Foundry's only cookie is its CSRF token (the
+  # proxy owns the session). On the production profile it is Secure and
+  # __Host-, although `up` ran with FERRUM_SECURE_COOKIES=false exported.
   cookies="$(browser -o /dev/null -D - -b "$admin_jar" "$ORIGIN/api/auth/session" | tr -d '\r' | grep -i '^set-cookie:' || true)"
-  for name in __Host-ferrum-foundry-session __Host-ferrum-foundry-csrf; do
-    line="$(grep -i "^set-cookie: $name=" <<<"$cookies" || true)"
-    [ -n "$line" ] || fail "the production BFF issued no $name cookie"
-    grep -qi '; *secure\(;\|$\)' <<<"$line" || fail "the production BFF issued $name without Secure"
-  done
-  echo "ok: the production BFF issues only Secure, __Host- session and CSRF cookies"
+  line="$(grep -i '^set-cookie: __Host-ferrum-foundry-csrf=' <<<"$cookies" || true)"
+  [ -n "$line" ] || fail "the production BFF issued no __Host-ferrum-foundry-csrf cookie ($(cut -d= -f1 <<<"$cookies" | tr '\n' ' '))"
+  grep -qi '; *secure\(;\|$\)' <<<"$line" || fail "the production BFF issued its CSRF cookie without Secure"
+  echo "ok: the production BFF issues its CSRF cookie Secure and __Host-"
 
   viewer_jar="$WORK/viewer.jar"
   # A user in several groups, the Ferrum one not first: oauth2-proxy joins

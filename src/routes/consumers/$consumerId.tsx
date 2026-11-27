@@ -5,6 +5,8 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { GeneratedResourceNotice } from "@/components/shared/GeneratedResource";
+import { isAddressableResourceId } from "@/lib/resourceId";
 import {
   useConsumer,
   useUpdateConsumer,
@@ -67,6 +69,7 @@ export default function ConsumerDetailPage() {
     onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
   });
 
+  if (!isAddressableResourceId(consumerId)) return <GeneratedResourceNotice kind="Consumer" id={consumerId} />;
   return <ConsumerEditor key={session.key} session={session} />;
 }
 

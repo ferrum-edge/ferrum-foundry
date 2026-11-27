@@ -5,6 +5,8 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import { GeneratedResourceNotice } from "@/components/shared/GeneratedResource";
+import { isAddressableResourceId } from "@/lib/resourceId";
 import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   pluginConfigKey,
@@ -60,6 +62,7 @@ export default function PluginDetailPage() {
     onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
   });
 
+  if (!isAddressableResourceId(pluginId)) return <GeneratedResourceNotice kind="Plugin configuration" id={pluginId} />;
   return <PluginEditor key={session.key} session={session} />;
 }
 

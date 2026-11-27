@@ -2,6 +2,7 @@ import { appendFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import { isGatewayHealthSnapshot } from '../../shared/health-snapshot.js';
 import { adminMetricsReporting } from '../../src/lib/adminMetricsReporting.js';
+import { isAddressableResourceId } from '../../src/lib/resourceId.js';
 
 /**
  * Every read a Foundry page makes, sent through the BFF against a gateway in
@@ -379,10 +380,27 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
           failures.push('database /proxies is empty after the demo seed');
         }
 
-        // Detail reads, as the editors open a row.
+        // Detail reads, as the editors open a row: the first row Edge serves
+        // by ID. A row outside Edge's ID grammar (a mesh sidecar's
+        // runtime-generated `__mesh…` rows) gets no detail page in Foundry
+        // (`isAddressableResourceId`); hold that to Edge's own refusal.
         for (const collection of DETAIL_COLLECTIONS) {
-          const first = (listed.get(`/${collection}`) ?? [])[0] as { id?: unknown } | undefined;
-          if (typeof first?.id !== 'string') continue;
+          const ids = ((listed.get(`/${collection}`) ?? []) as { id?: unknown }[])
+            .map((row) => row.id)
+            .filter((id): id is string => typeof id === 'string');
+          const generated = ids.find((id) => !isAddressableResourceId(id));
+          if (generated !== undefined) {
+            const refused = await app.inject({
+              method: 'GET', url: `/api/proxy/${collection}/${encodeURIComponent(generated)}`, headers: scopedHeaders,
+            });
+            rows.push(`| ${target.mode} | Detail | \`/${collection}/{generated id}\` | ${refused.statusCode} | Foundry offers no detail page |`);
+            if (refused.statusCode !== 400) {
+              failures.push(`${target.mode} detail of generated ${collection} row ${generated}: ${refused.statusCode}, expected Edge's 400`);
+            }
+          }
+          const firstId = ids.find(isAddressableResourceId);
+          if (firstId === undefined) continue;
+          const first = { id: firstId };
           const path = `/${collection}/${encodeURIComponent(first.id)}`;
           const response = await app.inject({ method: 'GET', url: `/api/proxy${path}`, headers: scopedHeaders });
           let id: unknown;

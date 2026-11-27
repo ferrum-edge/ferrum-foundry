@@ -5,6 +5,8 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 
 import { useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import { GeneratedResourceNotice } from "@/components/shared/GeneratedResource";
+import { isAddressableResourceId } from "@/lib/resourceId";
 import {
   useUpstream,
   useUpdateUpstream,
@@ -123,6 +125,7 @@ export default function UpstreamDetailPage() {
     onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
   });
 
+  if (!isAddressableResourceId(upstreamId)) return <GeneratedResourceNotice kind="Upstream" id={upstreamId} />;
   return <UpstreamEditor key={session.key} session={session} />;
 }
 

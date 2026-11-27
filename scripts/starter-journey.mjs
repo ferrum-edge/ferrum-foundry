@@ -197,12 +197,11 @@ async function openSession() {
   assert.equal(response.status, 200, "could not open an administrator session");
   const issued = response.headers.getSetCookie?.() ?? [];
   // The demo is plain HTTP on loopback, where WebKit drops Secure cookies:
-  // its BFF (`foundry-demo`) issues plain ones (#759 review F1).
-  for (const name of ["ferrum-foundry-session", "ferrum-foundry-csrf"]) {
-    const cookie = issued.find((entry) => entry.startsWith(`${name}=`));
-    assert.ok(cookie, `the demo BFF issued no ${name} cookie`);
-    assert.ok(!SECURE_ATTRIBUTE_PATTERN.test(cookie), `the demo BFF issued ${name} as Secure`);
-  }
+  // its BFF (`foundry-demo`) issues its one cookie, the CSRF token (the
+  // identity proxy owns the session), plain (#759 review F1).
+  const csrfCookie = issued.find((entry) => entry.startsWith("ferrum-foundry-csrf="));
+  assert.ok(csrfCookie, `the demo BFF issued no ferrum-foundry-csrf cookie (${issued.map((entry) => entry.split("=")[0]).join(", ")})`);
+  assert.ok(!SECURE_ATTRIBUTE_PATTERN.test(csrfCookie), "the demo BFF issued its CSRF cookie as Secure");
   const cookies = issued.map((cookie) => cookie.split(";")[0]).join("; ");
   const { csrfToken } = await response.json();
   assert.ok(csrfToken, "the session carried no CSRF token");
