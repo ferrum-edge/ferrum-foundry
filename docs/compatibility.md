@@ -341,7 +341,8 @@ covers all four routes beyond both pool sizes.
 
 Published Edge v0.9.14 adds control-plane attestation of data-plane backend
 egress policy (ferrum-edge#6020); CP and DP must run the same build. Foundry
-does not read `GET /backend-egress-policy`.
+does not read `GET /backend-egress-policy`, and its namespace route ceiling
+refuses it to a scoped session ([Admin API coverage](admin-api-coverage.md)).
 
 `GET /cluster` on a control plane adds each data plane's
 `backend_egress_policy_attestation` (`reported` or `unknown`) and
@@ -605,7 +606,8 @@ locks, which the Critical Journeys install (v0.5.5 ran 1.63.0), and
 
 ### Tested scale
 
-Scale claims stop at what has been measured.
+Scale claims stop at what has been measured. These are the 1.0 limits, not
+targets:
 
 - **Against the real gateway:** the demo seed and contract fixtures, tens of
   resources per namespace across two namespaces. Nothing larger has been run
@@ -626,6 +628,16 @@ is an explicit `403` naming that role. The writable half runs inside
 container of the same image started with `FERRUM_ADMIN_READ_ONLY=true`. See
 [capabilities.md](capabilities.md#drift) for what it probes and how.
 
+## Admin API coverage
+
+[Admin API coverage](admin-api-coverage.md) lists every operation in the
+paired Edge release's `openapi.yaml` and says whether the UI uses it, the BFF
+forwards it unused, or the BFF denies it, and whether a namespace-scoped session
+may reach it. `scripts/admin-api-coverage.test.mjs` checks the table against
+the BFF and the recorded `edge.source_commit`, and the Pinned Gateway Contract
+job checks it against the spec, so a pin move cannot add an unclassified
+operation silently.
+
 ## Best-effort
 
 Expected to work because nothing Foundry does depends on them, but not run in
@@ -640,18 +652,33 @@ CI. Report problems; they do not block releases.
 
 ## Not qualified
 
+These are deliberate limits of what a Foundry release qualifies, stated for
+every release from 1.0.0 onward; a change to them is recorded here and in the
+release notes.
+
 - `file`, `dp`, `mesh`, and `node_agent` gateway modes. The UI treats them as
   read-only ([capabilities.md](capabilities.md)) and the mock admin gateway
   reproduces that, but no real gateway in those modes runs in CI. The mesh,
-  waypoint, trust, and chargeback pages are therefore unqualified.
-- Any Foundry version other than published v0.5.6 against Edge v0.9.20, and
-  the earlier published pairings in [History](#history) against their own
-  Edge images. Previous successful qualification cannot qualify a moved pin.
-- Any Ferrum Edge release other than v0.9.21 (`edge.release`) for the v0.5.7
-  candidate.
-- Any Ferrum Edge image other than `edge.image`, including the `0.9.21-ebpf`
-  and `0.9.21-ebpf-tools` variants of the same release.
-- Browser latency, and more than one operator editing at scale.
+  waypoint, trust, chargeback and chargeback sink views are therefore
+  unqualified: they are built against the paired release's documented
+  response shapes and unit-tested against fixtures only.
+- Any Foundry version that is not a published release, and any published
+  Foundry release against an Edge release other than the one its immutable
+  record names ([History](#history)). A prepared release (`status:
+  "candidate"` in [`compatibility.json`](compatibility.json)) is not qualified
+  until its hosted qualification passes. Previous successful qualification
+  cannot qualify a moved pin.
+- For the version in `foundry.version`, any Ferrum Edge release other than
+  `edge.release` and any Ferrum Edge image other than `edge.image`, including
+  the eBPF variants of the same release.
+- Browser latency, more than one operator editing at scale, and anything above
+  the [tested scale](#tested-scale).
+
+Guided plugin editing covers four plugins (`key_auth`, `rate_limiting`, `cors`,
+`prometheus_metrics`); every other plugin is edited as raw JSON and admitted
+by Edge ([plugin schemas](plugin-schemas.md)). Seven shipped plugin templates
+are refused by the gateway until the operator supplies an environment-specific
+value ([plugin defaults](plugin-defaults.md#templates-that-need-operator-input)).
 
 ## Conditional writes on the paired release
 

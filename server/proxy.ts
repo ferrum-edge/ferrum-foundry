@@ -11,6 +11,7 @@ import { generateToken } from './jwt.js';
 import {
   proxyPathIsConsumerVerification,
   proxyPathIsDeploymentSnapshot,
+  proxyPathIsMeshConfigRevisionReset,
   proxyTargetPath,
   proxyTargetUrl,
   UnsafeProxyPathError,
@@ -433,6 +434,12 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
           code: 'FERRUM_BFF_CREDENTIAL_READ_DENIED',
         });
       }
+      if (proxyPathIsMeshConfigRevisionReset(path)) {
+        return reply.status(403).send({
+          error: 'Mesh config revision reset is not available through Foundry',
+          code: 'FERRUM_BFF_ROUTE_NOT_EXPOSED',
+        });
+      }
       if (request.authPrincipal) {
         authorizeRegistryPath(path, request.method, request.authPrincipal);
         const confirmed = authorizeRegistryDeleteConfirmation(
@@ -459,9 +466,10 @@ const proxyPlugin: FastifyPluginAsync = async (fastify) => {
   fastify.all('/api/proxy/*', {
     onRequest: [
       requireAdminAuth,
-      // Unsafe paths and the credential-read denials must answer with their
-      // documented 400 / 403 codes before the namespace ceiling can refuse a
-      // scoped principal for a route it does not know.
+      // Unsafe paths, the credential-read denials, and the routes Foundry
+      // does not expose must answer with their documented 400 / 403 codes
+      // before the namespace ceiling can refuse a scoped principal for a route
+      // it does not know.
       requireSafeProxyPath,
       requireNamespaceCeiling,
       reserveUpload,

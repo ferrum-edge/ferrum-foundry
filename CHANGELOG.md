@@ -1788,7 +1788,7 @@ First public release of Ferrum Foundry.
 [0.5.3]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...release/foundry-0.5.0
+[0.5.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ferrum-edge/ferrum-foundry/compare/v0.1.0...v0.2.0

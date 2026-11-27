@@ -31,7 +31,13 @@ const metrics: AdminMetrics = {
   },
   rate_limiting: { tracked_key_count: 0 },
 };
-const paths = ["/admin/metrics", "/metrics", "/metrics/runtime", "/overload", "/charges"];
+const paths = ["/admin/metrics", "/metrics", "/metrics/runtime", "/overload", "/charges", "/charges/sink/status"];
+const emptySinkStatus = {
+  enabled: false, instance_count: 0, snapshot_finalizations_pending: 0,
+  snapshot_finalizations_pending_bytes: 0, snapshot_finalizations_oldest_age_secs: 0,
+  snapshot_finalization_recovery_policy: "", instances: [],
+  totals: { per_event: { received_total: 0, persisted_total: 0, dropped_total: 0, pending: 0 }, queue: {}, spool: {}, export: {} },
+};
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
@@ -65,6 +71,7 @@ beforeEach(() => {
     if (path === "/metrics/runtime") return Response.json({});
     if (path === "/overload") return Response.json({ level: "normal" });
     if (path === "/charges") return Response.json({ consumers: {} });
+    if (path === "/charges/sink/status") return Response.json(emptySinkStatus);
     expect(path).toBe("/metrics");
     if (failPrometheus) return new Response("Unavailable", { status: 503 });
     if (holdPrometheus) await new Promise<void>((resolve) => { releasePrometheus = resolve; });
@@ -174,7 +181,7 @@ describe("Metrics page refresh policy", () => {
     for (const path of paths) expect(counts[path], path).toBeGreaterThanOrEqual(1);
     expect(counts["/admin/metrics"]).toBe(3);
     // The independent panels keep polling on the page interval.
-    const polled = ["/overload", "/metrics/runtime", "/charges"];
+    const polled = ["/overload", "/metrics/runtime", "/charges", "/charges/sink/status"];
     const before = polled.map((path) => counts[path]);
     await advance(10000);
     polled.forEach((path, index) => expect(counts[path], path).toBeGreaterThan(before[index] ?? 0));
@@ -201,7 +208,7 @@ describe("Metrics page refresh policy", () => {
     // The next interval retries admin metrics with no sample yet, which puts
     // that query back to pending. Hold it there.
     holdAdmin = true;
-    const polled = ["/overload", "/metrics/runtime", "/charges"];
+    const polled = ["/overload", "/metrics/runtime", "/charges", "/charges/sink/status"];
     const before = polled.map((path) => counts[path]);
     await advance(10000);
     expect(releaseAdmin.length).toBeGreaterThanOrEqual(1);

@@ -13,8 +13,14 @@ const targetPaths = new WeakMap<FastifyRequest, string>();
 // Edge v0.9.16+ (`ns_claim_global_route_is_allowed`, ferrum-edge#6093), which
 // refuses every other route to an admin JWT carrying an `ns` claim. Earlier
 // Edge releases admit such a JWT on fleet-global routes, so the BFF is the only
-// ceiling there. `POST /batch`, `GET /backup`, and `POST /restore` take their
-// namespace from the header.
+// ceiling there. `GET /backup` and `POST /restore` take their namespace from
+// the header.
+//
+// Least privilege: Edge also classifies `GET /config/export`,
+// `GET /backend-egress-policy`, and `POST /batch` as namespace-scoped, but
+// Foundry uses none of them, so they are not listed and a scoped principal is
+// refused (docs/admin-api-coverage.md). An unrestricted session is not subject
+// to this ceiling.
 const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   [
     'GET|POST',
@@ -31,11 +37,8 @@ const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['GET', /^\/api-specs\/by-proxy\/[^/]+\/?$/],
   ['GET', /^\/proxies\/[^/]+\/mcp\/tools\/?$/],
   ['GET', /^\/gateway-trust\/status\/?$/],
-  ['GET', /^\/config\/export\/?$/],
   ['GET', /^\/audit\/?$/],
-  // Edge classifies only the one-segment path, so no trailing slash.
-  ['GET', /^\/backend-egress-policy$/],
-  ['POST', /^\/(batch|restore)\/?$/],
+  ['POST', /^\/restore\/?$/],
   ['GET', /^\/backup\/?$/],
 ];
 
@@ -139,6 +142,16 @@ export function proxyPathIsConsumerVerification(path: string): boolean {
 export function proxyPathIsDeploymentSnapshot(path: string): boolean {
   // Classify only the normalized pathname serialized for upstream fetch.
   return path === '/deployment-snapshot' || path === '/deployment-snapshot/';
+}
+
+/**
+ * Clearing a mesh data plane's accepted config revision lowers a fail-closed
+ * rollback guard. Foundry deliberately does not expose that break-glass
+ * operation, so no session may send it through the BFF, whatever its role.
+ */
+export function proxyPathIsMeshConfigRevisionReset(path: string): boolean {
+  // Classify only the normalized pathname serialized for upstream fetch.
+  return path === '/mesh/config-revision/reset' || path === '/mesh/config-revision/reset/';
 }
 
 export function requestIsProxyRoute(request: FastifyRequest): boolean {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   proxyPathIsConsumerVerification,
   proxyPathIsDeploymentSnapshot,
+  proxyPathIsMeshConfigRevisionReset,
   proxyPathIsAllowedForNamespace,
   proxyPathIsEdgeNamespaceSafeGlobal,
   proxyTargetPath,
@@ -30,10 +31,7 @@ describe('canonical proxy targets', () => {
     ['GET', '/api/proxy/api-specs/by-proxy/orders'],
     ['GET', '/api/proxy/proxies/agents/mcp/tools'],
     ['GET', '/api/proxy/gateway-trust-bundles'],
-    ['GET', '/api/proxy/config/export'],
     ['GET', '/api/proxy/audit'],
-    ['GET', '/api/proxy/backend-egress-policy'],
-    ['POST', '/api/proxy/batch'],
     ['GET', '/api/proxy/backup'],
   ])('allows known namespace-scoped route class %s %s', (method, url) => {
     expect(proxyPathIsAllowedForNamespace(request(url, undefined, method))).toBe(true);
@@ -114,6 +112,11 @@ describe('canonical proxy targets', () => {
     ['HEAD', '/api/proxy/overload'],
     ['GET', '/api/proxy/health/'],
     ['GET', '/api/proxy/backend-egress-policy/'],
+    // Namespace-scoped in Edge, but unused by Foundry: withheld (least privilege).
+    ['GET', '/api/proxy/backend-egress-policy'],
+    ['GET', '/api/proxy/config/export'],
+    ['GET', '/api/proxy/config/export/'],
+    ['POST', '/api/proxy/batch'],
     ['GET', '/api/proxy/diagnostics/v1/refs/fd1_00'],
     ['POST', '/api/proxy/plugins'],
     ['OPTIONS', '/api/proxy/proxies'],
@@ -243,6 +246,20 @@ describe('canonical proxy targets', () => {
       expect(proxyPathIsDeploymentSnapshot(proxyTargetPath(req))).toBe(denied);
       expect(proxyPathIsDeploymentSnapshot(target.pathname)).toBe(denied);
     }
+  });
+
+  it.each([
+    ['/api/proxy/mesh/config-revision/reset', true],
+    ['/api/proxy/mesh/config-revision/reset/', true],
+    ['/api/proxy/mesh/config-revision/reset?confirm=true', true],
+    ['/api/proxy/mesh/%63onfig-revision/%72eset', true],
+    ['/api/proxy/mesh/config-revision', false],
+    ['/api/proxy/mesh/config-revision/reset/extra', false],
+    ['/api/proxy/mesh/config-drift?note=/mesh/config-revision/reset', false],
+  ])('classifies only the exact mesh config revision reset pathname of %s', (url, denied) => {
+    const req = request(url);
+    expect(proxyPathIsMeshConfigRevisionReset(proxyTargetPath(req))).toBe(denied);
+    expect(proxyPathIsMeshConfigRevisionReset(proxyTargetUrl(req, 'https://gateway.test').pathname)).toBe(denied);
   });
 
   it('keeps query syntax and escapes separate from path validation', () => {

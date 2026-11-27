@@ -1,7 +1,8 @@
 ## Description
 
-<!-- Provide a brief summary of the changes in this PR. Foundry is in buildout
-with no users; breaking changes are allowed. See README.md#development-status. -->
+<!-- Provide a brief summary of the changes in this PR. From 1.0.0 onward,
+deployment configuration, the BFF health endpoints and the supported Edge
+pairing rule are stable; see README.md#compatibility-policy. -->
 
 Fixes # (issue number)
 
@@ -11,7 +12,7 @@ Fixes # (issue number)
 
 - [ ] Bug fix
 - [ ] New feature
-- [ ] Breaking change (allowed during buildout; describe the changed behavior)
+- [ ] Breaking change to the stable surface (needs a deprecation first; see README.md#compatibility-policy)
 - [ ] Documentation update
 - [ ] Performance improvement
 - [ ] Code refactoring
@@ -50,7 +51,8 @@ Fixes # (issue number)
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] I have updated the documentation accordingly (if applicable)
 - [ ] My code follows the project's style guidelines
-- [ ] I have described any breaking changes and updated affected callers, fixtures, and docs
+- [ ] I have described any change to the stable surface or deprecation, and updated affected callers, fixtures, and docs
+- [ ] I have updated `docs/admin-api-coverage.md` if Foundry starts or stops calling an Edge admin API operation
 
 ## Performance Impact
 

@@ -5,9 +5,11 @@ served by a Fastify BFF (backend-for-frontend). The BFF holds the Ferrum Edge
 admin signing key, mints a short-lived admin JWT per request, and proxies admin
 API calls to the gateway.
 
-Foundry is in [active buildout](../README.md#development-status): development
-versions may break without an upgrade path. Foundry has no database or
-migrations of its own; gateway storage belongs to Ferrum Edge.
+From 1.0.0 onward, the configuration reference, the identity contract and the
+health endpoints on this page follow Foundry's
+[compatibility policy](../README.md#compatibility-policy): they do not break
+within 1.x, and a change is deprecated first. Foundry has no database,
+migrations or data files of its own; gateway storage belongs to Ferrum Edge.
 
 Foundry does not authenticate people. An identity-aware reverse proxy in front
 of it does. Read [Production authentication](authentication.md) first. For a

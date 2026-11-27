@@ -50,6 +50,18 @@ export function useCharges(refetchInterval?: number | false) {
   });
 }
 
+export function useChargebackSinkStatus(refetchInterval?: number | false) {
+  const { scope } = useNamespace();
+  return useQuery({
+    queryKey: ["chargebackSink"],
+    queryFn: () => ops.getChargebackSinkStatus(queryScope(scope)),
+    refetchInterval: refetchInterval ?? 30000,
+    refetchOnWindowFocus: refetchInterval === undefined ? undefined : false,
+    refetchOnReconnect: refetchInterval === false ? false : undefined,
+    retry: false,
+  });
+}
+
 export function useClusterStatus() {
   const { scope } = useNamespace();
   return useQuery({

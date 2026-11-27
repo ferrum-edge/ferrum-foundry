@@ -313,7 +313,6 @@ describe('trusted OIDC proxy authentication', () => {
         ['POST', '/api/proxy/admin/tls/validate'],
         ['POST', '/api/proxy/admin/tls/rotate/all'],
         ['POST', '/api/proxy/admin/tls/certificates'],
-        ['POST', '/api/proxy/mesh/config-revision/reset'],
         ['POST', '/api/proxy/backend-capabilities/refresh'],
         ['GET', '/api/proxy/new-admin-route'],
       ] as const) {

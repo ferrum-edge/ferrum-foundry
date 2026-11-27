@@ -18,9 +18,15 @@ future work from `[Unreleased]` here when preparing the next versioned notes.
 
 ### Known limitations
 
-Retain the documented support/security limits and pending owner decisions.
-Published upstream facts, canonical consumption, hosted Foundry qualification
-and Foundry publication remain separate evidence.
+Retain the documented support limits in
+[Not qualified](../compatibility.md#not-qualified). Three release controls are
+owner settings outside the repository, which no Foundry check can verify (see
+[release security](../release-security.md)): immutable-tag rules on Docker Hub
+for release version tags, required reviewers and environment-scoped Docker Hub
+secrets on the `release` environment, and the bypass list of the tag ruleset
+that blocks updating or deleting `v*` tags. Published upstream facts,
+canonical consumption, hosted Foundry qualification and Foundry publication
+remain separate evidence.
 
 ### Publication
 

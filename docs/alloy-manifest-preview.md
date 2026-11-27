@@ -3,8 +3,9 @@
 The Settings → Alloy Service Manifest card consumes the JSON data
 model of `ferrum.service_manifest` v1. It calls the authenticated BFF endpoint
 `POST /api/service-manifest/preview`; it never calls the gateway from the browser.
-Paste JSON matching the shared fixtures. This version does not parse the
-producer's TOML source, download a manifest URL, or load an OpenAPI file.
+Paste JSON matching the shared fixtures. By design for 1.0, the preview does
+not parse Alloy's TOML source, download a manifest URL, or load an OpenAPI
+file, and it never applies anything (see [What the result means](#what-the-result-means)).
 
 Viewers, operators and administrators may preview within their existing session
 grants. The request carries the active tab's `X-Ferrum-Namespace` and ordinary
@@ -32,12 +33,20 @@ The independently reviewed producer is Alloy `main` at commit
 (requalified for #719). Foundry reads its `manifest.rs` normalization rules,
 `export.rs` field mapping and the `tests/export.rs` regression tests; that
 review is producer evidence. The OTLP endpoint rule follows Ferrum Edge `main`
-(see below) where Alloy's differs. The published schema separately
-records its owner, Alloy `81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`: shared
-status **EXISTING**, with `x-contract.status: implemented` and owner
-availability `unreleased`. The schema remains a transcription of owner code,
-with post-default and cross-field limitations stated in its provenance. It does
-not publish Alloy crates or establish a Foundry diagnostic importer.
+(see below) where Alloy's differs. Alloy has since been released:
+[Ferrum Alloy v0.1.0](https://github.com/ferrum-edge/ferrum-alloy/releases/tag/v0.1.0)
+(published 2026-11-21, tag commit `c949978d7e90be33bac6a16e23744bcdd4ee3924`)
+contains both the reviewed producer commit and the schema owner commit below.
+Foundry has not re-reviewed the producer at that tag.
+
+The published schema separately records its owner, Alloy
+`81cbb410d34ff5fba1f3d54cfd2e7ebccaed397e`: shared status **EXISTING**, with
+`x-contract.status: implemented`. Its owner `availability` field still reads
+`unreleased`; that is the vendored `contracts-edge-0.9.21` metadata, written
+before Alloy v0.1.0 was published, and Foundry never edits vendored bytes. The
+schema remains a transcription of owner code, with post-default and
+cross-field limitations stated in its provenance. It does not establish a
+Foundry diagnostic importer.
 
 ## What the result means
 

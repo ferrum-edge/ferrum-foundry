@@ -184,13 +184,16 @@ grants into exactly that claim, so it offers such a session nothing Edge would
 refuse. Edge v0.9.15 and earlier admit an `ns`-claim JWT on fleet-global
 routes; there the BFF is the only ceiling, and it refuses the same routes.
 
-- **Allowed namespace-scoped routes** mirror Edge's
-  `namespace_scoped_resource_kind`: the `proxies`, `upstreams`, `consumers`,
-  `plugins/config`, `api-specs`, and `gateway-trust-bundles` resources; the
-  `gateway-trust` status; `POST /batch`, `GET /backup`, and `POST /restore`;
-  `GET /proxies/{id}/mcp/tools`; `GET /config/export`; `GET /audit`; and
-  `GET /backend-egress-policy`. Each must name one of the session's grants in
-  `X-Ferrum-Namespace`. Consumer credentials take only the methods Edge
+- **Allowed namespace-scoped routes** are the subset of Edge's
+  `namespace_scoped_resource_kind` that Foundry uses: the `proxies`,
+  `upstreams`, `consumers`, `plugins/config`, `api-specs`, and
+  `gateway-trust-bundles` resources; the `gateway-trust` status; `GET /backup`
+  and `POST /restore`; `GET /proxies/{id}/mcp/tools`; and `GET /audit`. Edge
+  also classifies `GET /config/export`, `GET /backend-egress-policy`, and
+  `POST /batch` as namespace-scoped; Foundry uses none of them, so the ceiling
+  refuses them (least privilege; see
+  [Admin API coverage](admin-api-coverage.md)). Each allowed route must name one
+  of the session's grants in `X-Ferrum-Namespace`. Consumer credentials take only the methods Edge
   serves: `PUT`, `POST`, and `DELETE` on `/consumers/{id}/credentials/{type}`,
   and `DELETE` on `/consumers/{id}/credentials/{type}/{index}`.
 - **Allowed fleet-wide routes** need no namespace header. They are Edge's
@@ -237,10 +240,11 @@ routes; there the BFF is the only ceiling, and it refuses the same routes.
   `HEAD /namespaces` is refused with `400` by the registry check before it is
   forwarded. Every other method must be named by the route class.
 
-The credential-read denial and unsafe-path checks run before the ceiling, so
-`/consumers/{id}/verification` and `/deployment-snapshot` keep
-`403 FERRUM_BFF_CREDENTIAL_READ_DENIED` and an unsafe path keeps
-`400 FERRUM_BFF_UNSAFE_PATH`, whatever the namespace grants.
+The credential-read denial, the not-exposed denial, and unsafe-path checks run
+before the ceiling, so `/consumers/{id}/verification` and `/deployment-snapshot`
+keep `403 FERRUM_BFF_CREDENTIAL_READ_DENIED`,
+`/mesh/config-revision/reset` keeps `403 FERRUM_BFF_ROUTE_NOT_EXPOSED`, and an
+unsafe path keeps `400 FERRUM_BFF_UNSAFE_PATH`, whatever the namespace grants.
 
 The UI mirrors the ceiling, as a convenience only. A scoped session lands on
 Proxies instead of the Dashboard and does not see the Dashboard, Metrics, TLS,
@@ -324,6 +328,20 @@ The snapshot stays secret-complete (its `api_spec_contents` array returns a
 base64 copy of every stored spec document), which is why the path-based refusal
 is unchanged. Edge answers on conditional paths Foundry never issues are relayed
 unchanged.
+
+### Operations Foundry does not expose
+
+Edge's `POST /mesh/config-revision/reset` clears a mesh data plane's accepted
+config revision, lowering the fail-closed guard that stops a lagging control
+plane from rolling the data plane back. It is a break-glass recovery for one
+data plane, and Edge recommends bumping the config authority id fleet-wide
+where possible. Foundry's mesh views are read-only, mesh mode is not a
+qualified Foundry mode, and no Foundry flow sends it, so the BFF refuses it
+through `/api/proxy/*` with `403 FERRUM_BFF_ROUTE_NOT_EXPOSED` for every method
+and every session, unrestricted administrators included, before capacity
+admission, JWT signing or upstream fetch. Operators who need it call the Edge
+admin API directly with their own `operator` token and `?confirm=true`; Edge
+audits it. See [Admin API coverage](admin-api-coverage.md).
 
 ### Runtime identity defaults
 

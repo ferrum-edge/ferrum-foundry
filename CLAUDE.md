@@ -2,21 +2,27 @@
 
 Admin UI for [Ferrum Edge](https://github.com/ferrum-edge/ferrum-edge), a high-performance API gateway built in Rust.
 
-## Buildout policy
+## Compatibility policy
 
-Ferrum Foundry is in active buildout and has no users yet. Breaking changes are
-allowed. Do not add compatibility shims, deprecation periods, or upgrade paths
-solely to preserve earlier development versions. Update code, tests, fixtures,
-demo data, and documentation together, keeping Foundry aligned with the current
-Ferrum Edge admin API.
+From 1.0.0 onward Foundry follows the
+[compatibility policy](README.md#compatibility-policy): deployment
+configuration (documented env vars, the trusted-proxy identity contract, the
+`/api/` prefix, the image's port, user, health check and tags), the BFF's
+health endpoints (`/api/health`, `/api/health/live`, `/api/health/ready`), and
+the supported Edge pairing rule are stable across 1.x. Change them
+incompatibly only through the documented deprecation (mark deprecated in a
+minor release with its replacement, keep it working, remove no earlier than
+2.0.0). The UI, the private `/api/*` routes and `scripts/` are not covered:
+update code, tests, fixtures, demo data and documentation together, keeping
+Foundry aligned with the paired Ferrum Edge admin API.
 
-Foundry has no application database, SQL schema, or migration runner. Ferrum
-Edge owns the database; do not copy its schema, migration files, or database
-implementation paths into this repository. If Foundry adds its own persistence
-during buildout, keep one canonical initial schema and fold later changes into
-it. Recreate disposable development data instead of building a migration
-history. Revisit compatibility and migration requirements before onboarding
-users.
+Foundry has no durable state of its own: no application database, SQL schema,
+migration runner or data files. Sessions and runtime settings are
+process-memory only; browser preferences are validated on read and fall back
+to defaults. Ferrum Edge owns the database; do not copy its schema, migration
+files, or database implementation paths into this repository. If Foundry ever
+adds durable state, it needs a frozen baseline schema, forward-only migrations,
+and a test that state written by the previous release opens after an upgrade.
 
 ## Architecture
 
@@ -34,6 +40,13 @@ https://github.com/ferrum-edge/ferrum-edge/blob/main/openapi.yaml.
 
 Check types and form fields against the upstream spec. It changes regularly, so
 a local copy would go stale.
+
+`docs/admin-api-coverage.md` classifies every operation of the pinned spec as
+used by the UI, forwarded but unused, or denied by the BFF, plus whether a
+namespace-scoped session may reach it. Update its row when the UI starts or
+stops calling an operation or `server/proxy-path.ts` changes:
+`scripts/admin-api-coverage.test.mjs` checks the rows against the BFF, and
+`npm run check:admin-api-coverage` (Pinned Gateway Contract) against the spec.
 
 Shared org contracts are vendored under `contracts/ferrum-contracts/`; see
 [Contracts](README.md#contracts).
