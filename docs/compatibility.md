@@ -609,9 +609,27 @@ locks, which the Critical Journeys install (v0.5.5 ran 1.63.0), and
 Scale claims stop at what has been measured. These are the 1.0 limits, not
 targets:
 
-- **Against the real gateway:** the demo seed and contract fixtures, tens of
-  resources per namespace across two namespaces. Nothing larger has been run
-  against a real gateway.
+- **Against the real gateway:** 1,000 proxies and 1,000 upstreams in one
+  namespace, seeded and read back through Foundry's BFF on every Pinned
+  Gateway Contract run (`server/routes/scale.gateway.test.ts`, step "Measure
+  1,000-record collections through the BFF"). The run asserts that every page
+  and every record comes back and writes requests, bytes and elapsed time to
+  the job summary. Measured on the v0.9.21 pin (hosted `ubuntu-26.04` runner,
+  [run 46069000787](https://github.com/ferrum-edge/ferrum-foundry/actions/runs/46069000787)):
+
+  | Read through the BFF | Requests | Response bytes | Elapsed |
+  | --- | ---: | ---: | ---: |
+  | Proxy list, first page (50 rows) | 1 | 75.2 KB | 19 ms |
+  | Proxy list, last page (50 rows) | 1 | 75.2 KB | 10 ms |
+  | Open one proxy | 1 | 1.5 KB | 4 ms |
+  | Every proxy (pages of 250) | 4 | 1.5 MB | 73 ms |
+  | Every upstream (pages of 250) | 4 | 485 KB | 38 ms |
+
+  Seeding both collections with one `POST /batch` took 433 ms. These are
+  BFF-to-gateway timings on one runner, not browser latency, and they are
+  evidence for this envelope, not a guarantee for larger ones. The other
+  journeys use the demo seed and contract fixtures (tens of resources across
+  two namespaces).
 - **Request budget, synthetic:** `src/api/dataLoadingBudget.test.ts` counts
   requests and response bytes at 500 and 50,000 records per collection against
   a synthetic gateway ([data-loading.md](data-loading.md)). That is not browser
