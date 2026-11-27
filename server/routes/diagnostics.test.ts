@@ -280,8 +280,10 @@ describe("diagnostic lookup for a listed role", () => {
       releases.push(() => resolve(Response.json(lookup)));
     }));
     const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
-    const first = lookUp(server);
-    const second = lookUp(server);
+    // light-my-request dispatches an injection only once it is awaited or
+    // `then`-ed, so start both explicitly.
+    const first = lookUp(server).then((response) => response);
+    const second = lookUp(server).then((response) => response);
     await vi.waitFor(() => expect(releases).toHaveLength(2));
     const third = await lookUp(server);
     expect(third.statusCode).toBe(429);
