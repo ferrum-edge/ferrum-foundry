@@ -279,6 +279,22 @@ jobs:
           FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
         run: npm run test:gateway-contract
 
+      - name: Measure 1,000-record collections through the BFF
+        # Seeds 1,000 proxies and 1,000 upstreams in a disposable namespace and
+        # reads them back through Foundry's BFF as the UI does (list pages, one
+        # editor, complete traversals). Correctness is asserted; request
+        # counts, bytes and elapsed time go to the job summary.
+        id: scale
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          FERRUM_SCALE_GATEWAY_CONTRACT: 'true'
+          FERRUM_SCALE_RECORDS: '1000'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/scale.gateway.test.ts
+
       - name: Verify role and read-only capability parity
         id: parity
         if: steps.ready.outcome == 'success'
@@ -307,7 +323,7 @@ jobs:
         run: npm exec -- vitest run --project frontend src/api/editorSave.gateway.test.ts
 
       - name: Show gateway logs on failure
-        if: failure() || steps.ready.outcome == 'failure' || steps.manifest.outcome == 'failure' || steps.seed.outcome == 'failure' || steps.parity.outcome == 'failure' || steps.editor-save.outcome == 'failure'
+        if: failure() || steps.ready.outcome == 'failure' || steps.manifest.outcome == 'failure' || steps.seed.outcome == 'failure' || steps.scale.outcome == 'failure' || steps.parity.outcome == 'failure' || steps.editor-save.outcome == 'failure'
         run: |
           docker logs ferrum-edge-contract
           docker logs ferrum-edge-read-only
@@ -333,6 +349,7 @@ jobs:
           READY: ${{ steps.ready.outcome }}
           MANIFEST: ${{ steps.manifest.outcome }}
           SEED: ${{ steps.seed.outcome }}
+          SCALE: ${{ steps.scale.outcome }}
           PARITY: ${{ steps.parity.outcome }}
           EDITOR_SAVE: ${{ steps.editor-save.outcome }}
           SETUP: >-
@@ -360,7 +377,7 @@ jobs:
             [ "${entry#*=}" = success ] || failed_setup="$failed_setup ${entry%%=*}"
           done
           outcome=clean
-          for result in "$STATIC" "$READY" "$MANIFEST" "$SEED" "$PARITY" "$EDITOR_SAVE"; do
+          for result in "$STATIC" "$READY" "$MANIFEST" "$SEED" "$SCALE" "$PARITY" "$EDITOR_SAVE"; do
             case "$result" in
               pass | success) ;;
               *) outcome=drift ;;
@@ -391,6 +408,7 @@ jobs:
             echo "| Gateway starts with Foundry's contract environment | $(verdict "$READY") |"
             echo "| Alloy preview and explicit HTTP resource mapping | $(verdict "$MANIFEST") |"
             echo "| Seed twice and verify canonical backup state (\`npm run test:gateway-contract\`) | $(verdict "$SEED") |"
+            echo "| 1,000-record collections read back through the BFF | $(verdict "$SCALE") |"
             echo "| Role and read-only capability parity | $(verdict "$PARITY") |"
             echo "| Unchanged proxy and upstream editor saves (\`mergeFormUpdatePayload\`) | $(verdict "$EDITOR_SAVE") |"
             echo
