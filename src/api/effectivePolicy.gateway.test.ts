@@ -272,7 +272,10 @@ it.runIf(GATEWAY)(
         ["consumers", created.consumers],
       ] as const) {
         for (const id of [...ids].reverse()) {
-          const answer = await admin(`/${collection}/${encodeURIComponent(id)}`, { method: "DELETE" });
+          // The proxies go first, so no plugin configuration is still
+          // referenced; Edge requires saying so (`expected_proxy_ids=`).
+          const query = collection === "plugins/config" ? "?expected_proxy_ids=" : "";
+          const answer = await admin(`/${collection}/${encodeURIComponent(id)}${query}`, { method: "DELETE" });
           if (![200, 204, 404].includes(answer.status)) {
             refused.push(`DELETE /${collection}/${id} -> ${answer.status}: ${answer.text.slice(0, 300)}`);
           }

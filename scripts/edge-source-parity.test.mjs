@@ -25,7 +25,7 @@ import { PLUGIN_METADATA } from "../src/lib/pluginConfigDefaults.ts";
 import { METRICS_MODES, NO_PROXY_STATE_MODES } from "../src/lib/adminMetricsReporting.ts";
 
 const UNREADABLE_PATTERN = /^unreadable: /;
-const ARM_PATTERN = /arm does not understand/;
+const ARM_PATTERN = /has an arm the parser does not understand/;
 const ENTRY_COUNT_PATTERN = /read 1 of 2 BUILTIN_PLUGIN_PARITY_META entries/;
 const MODE_LISTS_PATTERN = /2 `matches!\(\*mode, …\)` mode lists/;
 
