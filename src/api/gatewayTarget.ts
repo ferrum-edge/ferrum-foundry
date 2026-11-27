@@ -70,7 +70,8 @@ export function subscribeGatewayTarget(listener: () => void): () => void {
 /** BFF routes whose answer depends on the configured gateway target. */
 export function targetsGateway(url: string): boolean {
   const path = new URL(url, "http://localhost").pathname;
-  return path.startsWith("/api/proxy/") || path === "/api/settings" || path.startsWith("/api/settings/");
+  return path.startsWith("/api/proxy/") || path === "/api/settings" || path.startsWith("/api/settings/")
+    || path.startsWith("/api/diagnostics/refs/");
 }
 
 /**

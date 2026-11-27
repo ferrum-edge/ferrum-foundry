@@ -95,12 +95,30 @@ it.runIf(process.env.FERRUM_DIAGNOSTICS_GATEWAY_CONTRACT === 'true')(
       expect(missed.statusCode).toBe(404);
       expect(missed.json().code).toBe('FERRUM_BFF_DIAGNOSTIC_NOT_FOUND');
 
-      // Ordinary proxy tokens never carry the scope, so Edge refuses them.
-      const proxied = await app.inject({
-        method: 'GET', url: `/api/proxy/diagnostics/v1/refs/${ref}`,
-        headers: { ...operators, 'x-csrf-token': 'unused-on-get' },
+      // The generic proxy path: a scoped session is refused by the BFF's
+      // namespace ceiling before anything is signed.
+      const scopedProxied = await app.inject({
+        method: 'GET', url: `/api/proxy/diagnostics/v1/refs/${ref}`, headers: operators,
       });
-      expect(proxied.statusCode).toBe(403);
+      expect(scopedProxied.statusCode).toBe(403);
+      expect(scopedProxied.json()).toEqual({ error: 'Namespace access denied' });
+
+      // An unrestricted admin's ordinary proxy token is forwarded, and Edge
+      // refuses it because that token never carries the scope (nor an `ns`).
+      const fleetIdentity = {
+        'x-ferrum-auth-secret': proof, 'x-forwarded-user': 'diagnostics-fleet-admin', 'x-ferrum-role': 'admin',
+      };
+      const fleetSession = await app.inject({ method: 'GET', url: '/api/auth/session', headers: fleetIdentity });
+      expect(fleetSession.statusCode).toBe(200);
+      const fleetProxied = await app.inject({
+        method: 'GET', url: `/api/proxy/diagnostics/v1/refs/${ref}`,
+        headers: {
+          ...fleetIdentity,
+          cookie: fleetSession.cookies.map((entry) => `${entry.name}=${entry.value}`).join('; '),
+        },
+      });
+      expect(fleetProxied.statusCode, fleetProxied.body).toBe(403);
+      expect(fleetProxied.json()).not.toEqual({ error: 'Namespace access denied' });
     } finally {
       await admin(`/proxies/${proxyId}?apply=sync&cleanup_orphaned_upstream=false`, 'DELETE');
       await app.close();

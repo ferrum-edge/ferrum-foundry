@@ -8,7 +8,8 @@ const auth = vi.hoisted(() => ({
   principal: { subject: "ops", displayName: "ops", role: "viewer", authMode: "trusted-proxy" } as unknown,
 }));
 vi.mock("@/stores/auth", () => ({ useAuth: () => ({ principal: auth.principal }) }));
-vi.mock("@/stores/namespace", () => ({ useNamespace: () => ({ scope: { namespace: "tenant-a" } }) }));
+const active = vi.hoisted(() => ({ namespace: "tenant-a" }));
+vi.mock("@/stores/namespace", () => ({ useNamespace: () => ({ scope: { namespace: active.namespace } }) }));
 
 const REF = `fd1_${"3f9c2a7e5b1d4c8a".repeat(2)}`;
 const lookup = {
@@ -40,6 +41,7 @@ let answer: () => Response;
 let requests: Request[];
 
 beforeEach(() => {
+  active.namespace = "tenant-a";
   ui = createHarness();
   permitted = true;
   requests = [];
@@ -113,7 +115,39 @@ describe("diagnostic reference lookup", () => {
     expect(text).toContain("pre wire failure");
   });
 
-  it("reports an unknown reference, naming the replica that minted it", async () => {
+  it("drops the input and the answer when the namespace changes", async () => {
+    await ui.render(<DiagnosticLookupCard />);
+    await settle(() => expect(ui.host.textContent).toContain("namespace tenant-a"));
+    await submit(REF);
+    await settle(() => expect(ui.host.textContent).toContain("orders-api"));
+    active.namespace = "tenant-b";
+    await ui.render(<DiagnosticLookupCard />);
+    await settle(() => expect(ui.host.textContent).toContain("namespace tenant-b"));
+    expect(ui.host.textContent).not.toContain("orders-api");
+    expect(inputByLabel(ui.host, "Diagnostic reference").value).toBe("");
+  });
+
+  it("does not show a lookup that answers after a namespace change", async () => {
+    let land: (() => void) | undefined;
+    answer = () => Response.json(lookup);
+    stubFetch(async (request) => {
+      requests.push(request);
+      const path = new URL(request.url).pathname;
+      if (path === "/api/diagnostics/config") return Response.json({ lookupPermitted: true });
+      return new Promise<Response>((resolve) => { land = () => resolve(answer()); });
+    });
+    await ui.render(<DiagnosticLookupCard />);
+    await settle(() => expect(ui.host.textContent).toContain("namespace tenant-a"));
+    await submit(REF);
+    await settle(() => expect(land).toBeDefined());
+    active.namespace = "tenant-b";
+    await ui.render(<DiagnosticLookupCard />);
+    await act(async () => land!());
+    await settle(() => expect(ui.host.textContent).toContain("namespace tenant-b"));
+    expect(ui.host.textContent).not.toContain("orders-api");
+  });
+
+  it("reports an unknown reference, naming the replica it names without claiming it exists", async () => {
     answer = () => Response.json({
       error: "No diagnostic reference matches in this namespace on this gateway process, or it expired",
       code: "FERRUM_BFF_DIAGNOSTIC_NOT_FOUND",
@@ -123,7 +157,8 @@ describe("diagnostic reference lookup", () => {
     await settle(() => expect(ui.host.textContent).toContain("Diagnostic reference lookup"));
     await submit(REF);
     await settle(() => expect(ui.host.textContent).toContain("No diagnostic reference matches"));
-    expect(ui.host.textContent).toContain("0a1b2c3d");
+    expect(ui.host.textContent).toContain("The reference names gateway replica 0a1b2c3d");
+    expect(ui.host.textContent).not.toContain("minted");
   });
 
   it("reports a refusal with the BFF's fixed message", async () => {

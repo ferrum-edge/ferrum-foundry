@@ -276,21 +276,105 @@ describe("diagnostic lookup for a listed role", () => {
 
   it("holds at most two lookups per principal in flight", async () => {
     const releases: Array<() => void> = [];
-    upstream.mockImplementation(() => new Promise((resolve) => {
-      releases.push(() => resolve(Response.json(lookup)));
-    }));
+    // Only the first two gateway calls are held; any later one answers at once.
+    upstream.mockImplementation(() => releases.length < 2
+      ? new Promise((resolve) => { releases.push(() => resolve(Response.json(lookup))); })
+      : Promise.resolve(Response.json(lookup)));
     const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
-    // light-my-request dispatches an injection only once it is awaited or
-    // `then`-ed, so start both explicitly.
-    const first = lookUp(server).then((response) => response);
-    const second = lookUp(server).then((response) => response);
-    await vi.waitFor(() => expect(releases).toHaveLength(2));
-    const third = await lookUp(server);
-    expect(third.statusCode).toBe(429);
-    expect(third.json().code).toBe("FERRUM_BFF_DIAGNOSTICS_CAPACITY");
-    for (const release of releases) release();
-    expect((await first).statusCode).toBe(200);
-    expect((await second).statusCode).toBe(200);
-    expect((await lookUp(server)).statusCode).toBe(200);
+    try {
+      // light-my-request dispatches an injection only once it is awaited or
+      // `then`-ed, so start both explicitly.
+      const first = lookUp(server).then((response) => response);
+      const second = lookUp(server).then((response) => response);
+      await vi.waitFor(() => expect(releases).toHaveLength(2));
+      const third = await lookUp(server);
+      expect(third.statusCode).toBe(429);
+      expect(third.json().code).toBe("FERRUM_BFF_DIAGNOSTICS_CAPACITY");
+      for (const release of releases) release();
+      expect((await first).statusCode).toBe(200);
+      expect((await second).statusCode).toBe(200);
+      expect((await lookUp(server)).statusCode).toBe(200);
+    } finally {
+      for (const release of releases) release();
+    }
+  });
+
+  it("refuses the unreviewed response shapes instead of coercing them", async () => {
+    const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
+    const { detail_available: _omitted, ...withoutFlag } = lookup;
+    for (const body of [
+      { ...lookup, schema_version: "ferrum.diagnostic_ref.v2" },
+      withoutFlag,
+      { ...lookup, detail_available: "true" },
+      { ...lookup, detail: { ...lookup.detail, attempts: { attempt: 1 } } },
+    ]) {
+      upstream.mockImplementationOnce(async () => Response.json(body));
+      const response = await lookUp(server);
+      expect(response.statusCode).toBe(502);
+      expect(response.json().code).toBe("FERRUM_BFF_DIAGNOSTICS_UNAVAILABLE");
+    }
+  });
+
+  it("keeps an explicit default port and omits an oversized backend target", async () => {
+    const { structuralTarget } = await import("./diagnostics.js");
+    expect(structuralTarget("https://orders.internal:443/path?token=x")).toBe("https://orders.internal:443");
+    expect(structuralTarget("http://user:pass@orders.internal:80")).toBe("http://orders.internal:80");
+    expect(structuralTarget("https://orders.internal/x")).toBe("https://orders.internal");
+    expect(structuralTarget(`https://${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(61)}:8443`)).toBeNull();
+    expect(structuralTarget("not a url")).toBeNull();
+  });
+
+  it("refuses a lookup issued against a replaced gateway target before signing or fetching", async () => {
+    const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
+    const response = await lookUp(server, undefined, { "x-foundry-gateway-target": "replaced-gateway" });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("FERRUM_BFF_GATEWAY_TARGET_CHANGED");
+    expect(upstream).not.toHaveBeenCalled();
+    const current = await lookUp(server);
+    expect(current.statusCode).toBe(200);
+    expect(current.headers["x-foundry-gateway-target"]).toEqual(expect.any(String));
+  });
+
+  it("answers an overlong or malformed target with a fixed body that echoes nothing", async () => {
+    const server = await setup({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
+    const secret = "https://user:hunter2-secret@elsewhere.test/";
+    for (const url of [
+      `/api/diagnostics/refs/${encodeURIComponent(secret)}`,
+      `/api/diagnostics/refs/${"f".repeat(5000)}`,
+      `/api/diagnostics/refs/${REF}/extra`,
+    ]) {
+      const response = await lookUp(server, url);
+      expect(response.statusCode, url.slice(0, 60)).toBe(400);
+      expect(response.json().code).toBe("FERRUM_BFF_DIAGNOSTIC_REF_INVALID");
+      expect(response.body).not.toContain("hunter2");
+      expect(response.body).not.toContain("ffffffffff");
+    }
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});
+
+describe("diagnostic lookup request logging", () => {
+  it("never writes a rejected lookup target to the log, even before authentication", async () => {
+    stubEnvironment({ FERRUM_DIAGNOSTICS_ROLES: "admin" });
+    let logs = "";
+    const { buildApp } = await import("../app.js");
+    const app = await buildApp({ serveStatic: false, logger: {
+      level: "debug", stream: { write: (chunk: string) => { logs += chunk; } },
+    } });
+    try {
+      const secret = "hunter2-credential-in-a-mistaken-target";
+      for (const url of [
+        `/api/diagnostics/refs/https%3A%2F%2Fuser%3A${secret}%40elsewhere.test`,
+        `/api/diagnostics/refs/${secret}?token=${secret}`,
+        `/%61pi/diagnostics/refs/${secret}`,
+      ]) {
+        await app.inject({ method: "GET", url });
+      }
+      // The real logger ran, and saw only the fixed projection.
+      expect(logs).toContain("Diagnostic lookup request");
+      expect(logs).not.toContain(secret);
+    } finally {
+      await app.close();
+    }
   });
 });

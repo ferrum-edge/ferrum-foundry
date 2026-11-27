@@ -22,18 +22,26 @@
  *   fixed messages with fixed codes, never a raw gateway body.
  */
 
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
 import { fetch } from 'undici';
 import { signAdminJwt } from '../../shared/admin-jwt.js';
 import { isNamespaceName } from '../../shared/namespace.js';
 import { requireAdminAuth } from '../auth.js';
 import type { AuthPrincipal } from '../auth-types.js';
 import { loadConfig, type Config } from '../config.js';
+import { rejectStaleGatewayTarget, stampGatewayTarget } from '../gateway-target.js';
 import { getDispatcher } from '../tls.js';
 
 export const DIAGNOSTICS_SCOPE = 'diagnostics:read';
 export const DIAGNOSTIC_REF_PATTERN = /^(?:fd1_[0-9a-f]{32}|fd2_[0-9a-f]{8}_[0-9a-f]{32})$/;
 const REPLICA_ID_PATTERN = /^[0-9a-f]{8}$/;
+const SCHEMA_VERSION = 'ferrum.diagnostic_ref.v1';
+const LOOKUP_PREFIX = '/api/diagnostics/refs/';
+const ABSOLUTE_URL_ORIGIN_PATTERN = /^https?:\/\/[^/]+/;
+const ASCII_PERCENT_ESCAPE_PATTERN = /%([0-7][0-9a-f])/gi;
+const PORT_PATTERN = /^\d{1,5}$/;
+const EXPLICIT_PORT_PATTERN = /:(\d{1,5})$/;
+const AUTHORITY_END_PATTERN = /[/?#]/;
 
 export const DIAGNOSTIC_LIMITS = {
   /** Serialized request target, path and any query, in bytes. */
@@ -169,13 +177,20 @@ function integer(value: unknown): number {
 export function structuralTarget(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'string') throw new ProjectionError();
+  let url: URL;
   try {
-    const url = new URL(value);
-    if (!url.host) return null;
-    return `${url.protocol}//${url.host}`;
+    url = new URL(value);
   } catch {
     return null;
   }
+  if (!url.hostname) return null;
+  // `URL` drops a port equal to the scheme default; keep the one Edge wrote.
+  const authority = value.slice(url.protocol.length + 2).split(AUTHORITY_END_PATTERN, 1)[0].split('@').pop() ?? '';
+  const explicit = EXPLICIT_PORT_PATTERN.exec(authority)?.[1];
+  const port = url.port || (explicit && PORT_PATTERN.test(explicit) ? explicit : '');
+  const target = `${url.protocol}//${url.hostname}${port ? `:${port}` : ''}`;
+  // A structural form longer than the string bound is omitted, not cut.
+  return target.length > DIAGNOSTIC_LIMITS.maxStringLength ? null : target;
 }
 
 function depth(value: unknown, level = 1): number {
@@ -193,8 +208,13 @@ function depth(value: unknown, level = 1): number {
 export function projectDiagnosticLookup(body: unknown): DiagnosticLookup {
   if (depth(body) > DIAGNOSTIC_LIMITS.maxDepth) throw new ProjectionError();
   const source = record(body);
+  // Only the reviewed shape: another schema version, a non-Boolean
+  // `detail_available`, or a non-array `attempts` is refused, never coerced.
+  if (source.schema_version !== SCHEMA_VERSION || typeof source.detail_available !== 'boolean') {
+    throw new ProjectionError();
+  }
   const lookup: DiagnosticLookup = {
-    schema_version: text(source.schema_version),
+    schema_version: SCHEMA_VERSION,
     ref: text(source.ref),
     namespace: text(source.namespace),
     created_at: text(source.created_at),
@@ -202,13 +222,14 @@ export function projectDiagnosticLookup(body: unknown): DiagnosticLookup {
     protocol: text(source.protocol),
     status: integer(source.status),
     gateway_error: nullableText(source.gateway_error),
-    detail_available: source.detail_available === true,
+    detail_available: source.detail_available,
   };
   const replica = optionalText(source.replica_id);
   if (replica !== undefined) lookup.replica_id = replica;
   if (source.detail !== undefined && source.detail !== null) {
     const detail = record(source.detail);
-    const attempts = Array.isArray(detail.attempts) ? detail.attempts : [];
+    if (detail.attempts !== undefined && !Array.isArray(detail.attempts)) throw new ProjectionError();
+    const attempts: unknown[] = Array.isArray(detail.attempts) ? detail.attempts : [];
     lookup.detail = {
       error_class: nullableText(detail.error_class),
       body_error_class: nullableText(detail.body_error_class),
@@ -304,6 +325,53 @@ function release(subject: string): void {
   activeTotal = Math.max(0, activeTotal - 1);
 }
 
+/* ---------- Request logging ---------- */
+
+/** Whether a raw request target is under `/api/diagnostics/`, escapes decoded once. */
+export function isDiagnosticsRequest(url: string | undefined): boolean {
+  const path = (url ?? '').split('?', 1)[0].replace(ABSOLUTE_URL_ORIGIN_PATTERN, '');
+  const decoded = path.replace(ASCII_PERCENT_ESCAPE_PATTERN, (_escape, hex: string) =>
+    String.fromCharCode(Number.parseInt(hex, 16)),
+  );
+  return decoded.startsWith('/api/diagnostics/');
+}
+
+function httpStatusCode(value: unknown): number | null {
+  if (value === null || typeof value !== 'object' || !('statusCode' in value)) return null;
+  const status = (value as { statusCode: unknown }).statusCode;
+  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
+    ? status
+    : null;
+}
+
+/**
+ * Installed at app construction, like the manifest preview's: a rejected
+ * lookup target (which a mistaken client could fill with a credential-bearing
+ * URL) never reaches a log line, and a malformed URL that bypasses routing
+ * gets a fixed answer instead of Fastify's echo of the target.
+ */
+export const diagnosticsRequestLogging: Required<Pick<FastifyServerOptions, 'childLoggerFactory' | 'frameworkErrors'>> = {
+  childLoggerFactory(logger, bindings, options, rawRequest) {
+    if (!isDiagnosticsRequest(rawRequest.url)) return logger.child(bindings, options);
+    return logger.child(bindings, {
+      ...options,
+      serializers: {
+        ...options.serializers,
+        req: () => ({ method: 'GET', url: '/api/diagnostics/…' }),
+        res: (response: unknown) => ({ statusCode: httpStatusCode(response) }),
+        err: (error: unknown) => ({
+          type: 'Error', message: 'Diagnostic lookup failed', statusCode: httpStatusCode(error),
+        }),
+        msg: () => 'Diagnostic lookup request',
+      },
+    });
+  },
+  frameworkErrors(_error: unknown, request: FastifyRequest, reply: FastifyReply) {
+    request.log.warn('Diagnostic lookup refused');
+    return fail(reply, 'FERRUM_BFF_DIAGNOSTIC_REF_INVALID');
+  },
+};
+
 /* ---------- Routes ---------- */
 
 const diagnosticsPlugin: FastifyPluginAsync = async (fastify) => {
@@ -314,8 +382,17 @@ const diagnosticsPlugin: FastifyPluginAsync = async (fastify) => {
     return { lookupPermitted: diagnosticsPermitted(loadConfig(), principal) };
   });
 
-  fastify.get<{ Params: { ref: string } }>(
-    '/api/diagnostics/refs/:ref',
+  // Any failure inside this plugin answers a fixed body; the raw error, which
+  // may carry the request target, is never sent or logged.
+  fastify.setErrorHandler((_error, request, reply) => {
+    request.log.warn('Diagnostic lookup failed');
+    return fail(reply, 'FERRUM_BFF_DIAGNOSTICS_UNAVAILABLE');
+  });
+
+  // A wildcard, not `:ref`, so an overlong or malformed segment still reaches
+  // this handler's fixed refusal instead of the router's echoing 404.
+  fastify.get(
+    `${LOOKUP_PREFIX}*`,
     { onRequest: requireAdminAuth },
     async (request, reply) => {
       const config = loadConfig();
@@ -325,15 +402,14 @@ const diagnosticsPlugin: FastifyPluginAsync = async (fastify) => {
       if (!diagnosticsPermitted(config, principal)) return fail(reply, 'FERRUM_BFF_DIAGNOSTICS_NOT_PERMITTED');
 
       const target = request.raw.url ?? request.url;
-      const ref = request.params.ref;
-      if (
-        Buffer.byteLength(target) > DIAGNOSTIC_LIMITS.maxRequestBytes ||
-        target.includes('?') ||
-        target !== `/api/diagnostics/refs/${ref}` ||
-        !DIAGNOSTIC_REF_PATTERN.test(ref)
-      ) {
+      const ref = target.startsWith(LOOKUP_PREFIX) ? target.slice(LOOKUP_PREFIX.length) : '';
+      if (Buffer.byteLength(target) > DIAGNOSTIC_LIMITS.maxRequestBytes || !DIAGNOSTIC_REF_PATTERN.test(ref)) {
         return fail(reply, 'FERRUM_BFF_DIAGNOSTIC_REF_INVALID');
       }
+      // Bound to the gateway the page was loaded against: a lookup issued
+      // before the tab saw a gateway change is refused, never sent to the new
+      // gateway, where the reference cannot exist.
+      if (!stampGatewayTarget(request, reply, config)) return rejectStaleGatewayTarget(reply);
 
       const header = request.headers['x-ferrum-namespace'];
       const namespace = typeof header === 'string' ? header.trim() : undefined;

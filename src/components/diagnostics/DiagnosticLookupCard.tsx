@@ -15,6 +15,7 @@ import {
   lookupDiagnosticRef,
   type DiagnosticLookup,
 } from "@/api/diagnostics";
+import type { NamespaceScope } from "@/api/client";
 import { useAuth } from "@/stores/auth";
 import { useNamespace } from "@/stores/namespace";
 
@@ -35,13 +36,18 @@ export function DiagnosticLookupCard() {
     staleTime: Infinity,
     retry: false,
   });
+  if (permission.data !== true) return null;
+  // Keyed by namespace: a switch drops the input, any answer on screen, and
+  // a lookup still in flight, which belong to the namespace it was sent in.
+  return <LookupForm key={scope.namespace} scope={scope} />;
+}
+
+function LookupForm({ scope }: { scope: NamespaceScope }) {
   const [ref, setRef] = useState("");
   const [inputError, setInputError] = useState<string | null>(null);
   const lookup = useMutation({
     mutationFn: (value: string) => lookupDiagnosticRef(scope, value),
   });
-
-  if (permission.data !== true) return null;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -96,8 +102,8 @@ function LookupFailure({ error }: { error: unknown }) {
       </p>
       {failure?.ownerReplica && (
         <p className="text-xs text-text-muted mt-1">
-          Gateway replica <span className="font-mono">{failure.ownerReplica}</span> minted this reference; query
-          that replica&apos;s admin API.
+          The reference names gateway replica <span className="font-mono">{failure.ownerReplica}</span>. Only that
+          replica&apos;s admin API could resolve it, if it still holds it.
         </p>
       )}
     </div>

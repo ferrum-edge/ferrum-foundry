@@ -205,7 +205,9 @@ routes; there the BFF is the only ceiling, and it refuses the same routes.
   BFF confines writes to the session's grants, and Edge authorizes the claim in
   its registry handlers), `GET /live`, `GET /health`, and `GET /status`.
   Foundry does not forward `GET /overload` or Edge's
-  `GET /diagnostics/v1/refs/{ref}` for a scoped session.
+  `GET /diagnostics/v1/refs/{ref}` for a scoped session; references are
+  resolved only through the dedicated
+  [diagnostic reference lookup](#diagnostic-reference-lookup).
 - **Health summary.** Edge v0.9.15 and earlier answer an `ns`-claim JWT with
   the detailed `/health` and `/status` view: listeners, `dp_config`,
   `cp_dp_trust`, database, and cached-config detail. Edge v0.9.16+ answer it

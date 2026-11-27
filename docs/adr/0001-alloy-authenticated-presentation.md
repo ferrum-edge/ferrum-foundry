@@ -25,7 +25,7 @@ Do not add an auth mode or open Alloy management ports. A viewer can review data
 that the authoritative producer permits it to read; read denial remains denial,
 not an empty collection, and missing/unavailable evidence remains unknown.
 
-Any future diagnostic presentation must use a fixed allowlist of authoritative
+Diagnostic presentation must use a fixed allowlist of authoritative
 gateway/service routes with a deployment-controlled target. The browser supplies
 bounded typed references, never a URL, filesystem path, forwarded credential or
 arbitrary query. The BFF verifies namespace access before parsing or initiating
@@ -34,13 +34,14 @@ producer's authentication contract. It must not proxy generic Alloy management
 traffic, synthesize verified identity from a report, or fall back to another
 tenant when a producer denies access.
 
-Future lookup implementation must make concrete budgets part of its route:
+A lookup makes concrete budgets part of its route:
 at most 4 KiB serialized query, one authorized namespace, 100 returned records,
 64 KiB response bytes **before** parse, nesting at most eight levels, and a
 five-second absolute deadline with cancellation and admission limits. Pagination
 or another producer fetch must consume the same budget; incomplete evidence
-cannot become a complete conclusion. This ADR proposes those limits; no
-diagnostic route enforces them yet. Adjusting them requires reviewed evidence
+cannot become a complete conclusion. The diagnostic reference lookup (below)
+enforces these limits on its dedicated route; its one reference returns one
+record, so the 100-record bound is not reached. Adjusting them requires reviewed evidence
 from the producer and consumer rather than unrestricted pass-through.
 
 Redact credentials, key material and sensitive endpoint components before

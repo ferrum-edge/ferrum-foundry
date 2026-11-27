@@ -61,6 +61,9 @@ services:
       # lockout"). 0 failures disables it.
       FERRUM_AUTH_MAX_FAILURES: ${FERRUM_AUTH_MAX_FAILURES:-10}
       FERRUM_AUTH_LOCKOUT_SECONDS: ${FERRUM_AUTH_LOCKOUT_SECONDS:-60}
+      # Roles whose sessions may resolve gateway diagnostic references
+      # (docs/deployment.md). Empty, the default, enables no role.
+      FERRUM_DIAGNOSTICS_ROLES: ${FERRUM_DIAGNOSTICS_ROLES:-}
       FERRUM_SHUTDOWN_TIMEOUT: "10000"
       # Extra trust anchors for the admin API connection, when the gateway
       # presents a private certificate. Leave unset for a public chain.
