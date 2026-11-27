@@ -346,6 +346,26 @@ admission, JWT signing or upstream fetch. Operators who need it call the Edge
 admin API directly with their own `operator` token and `?confirm=true`; Edge
 audits it. See [Admin API coverage](admin-api-coverage.md).
 
+### Diagnostic reference lookup
+
+`GET /api/diagnostics/refs/{ref}` resolves an Edge `X-Ferrum-Diagnostic-Ref`
+(`fd1_…` or `fd2_…`) for the Status page's lookup card. Edge requires the
+`diagnostics:read` scope and an `ns` claim, and never implies the scope from a
+role. Foundry grants it only to the roles listed in `FERRUM_DIAGNOSTICS_ROLES`,
+which is empty by default, so no session may look references up until the
+deployment opts a role in. `GET /api/diagnostics/config` tells the UI whether
+to show the card; the route refuses an unlisted role with
+`403 FERRUM_BFF_DIAGNOSTICS_NOT_PERMITTED` whatever the UI shows, before
+anything else is parsed or sent.
+
+A listed role's lookup carries one `X-Ferrum-Namespace` the session is granted
+(any valid name for an unrestricted session). The BFF signs a token for that
+one lookup: the session's subject and role, `ns` set to that namespace,
+`scope: diagnostics:read`, and a lifetime of at most 60 seconds. Ordinary
+`/api/proxy` tokens never carry the scope. Budgets, the response projection
+and the fixed failure codes are in
+[ADR 0001](adr/0001-alloy-authenticated-presentation.md#implemented-slice).
+
 ### Runtime identity defaults
 
 BFF settings are fleet-wide: the gateway target, TLS trust, JWT signing, and

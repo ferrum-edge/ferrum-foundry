@@ -216,6 +216,7 @@ jobs:
             --env FERRUM_ADMIN_JWT_AUDIENCE=ferrum-admin \
             --env FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true \
             --env FERRUM_BASIC_AUTH_HMAC_SECRET=contract-basic-auth-hmac-secret-at-least-32-characters \
+            --env FERRUM_DIAGNOSTIC_REFS=errors \
             "$FERRUM_EDGE_IMAGE"
 
       - name: Start the same gateway with its admin API read-only
@@ -263,6 +264,19 @@ jobs:
           FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
           FERRUM_JWT_AUDIENCE: ferrum-admin
         run: npm exec -- vitest run --project server server/routes/service-manifest.gateway.test.ts
+
+      - name: Verify the diagnostic reference lookup against the gateway
+        # The contract gateway stamps X-Ferrum-Diagnostic-Ref on its own error
+        # responses (FERRUM_DIAGNOSTIC_REFS=errors). The BFF route must resolve
+        # one for a role in FERRUM_DIAGNOSTICS_ROLES and refuse any other role.
+        env:
+          FERRUM_DIAGNOSTICS_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/diagnostics.gateway.test.ts
 
       - name: Seed twice and verify canonical backup state
         id: seed

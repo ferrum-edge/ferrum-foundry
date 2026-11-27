@@ -9,6 +9,7 @@ import StatusPage from './index';
 
 vi.mock('@/stores/namespace', () => ({ useNamespace: () => ({ scope: { namespace: 'tenant-a' } }) }));
 vi.mock('@/components/shared/BffConnectionCard', () => ({ BffConnectionCard: () => null }));
+vi.mock('@/components/diagnostics/DiagnosticLookupCard', () => ({ DiagnosticLookupCard: () => null }));
 let harness: ReturnType<typeof createHarness>;
 beforeEach(() => { harness = createHarness(); });
 afterEach(async () => { await harness.dispose(); vi.unstubAllGlobals(); });

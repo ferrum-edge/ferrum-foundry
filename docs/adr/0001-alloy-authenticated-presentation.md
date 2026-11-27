@@ -1,10 +1,9 @@
 # ADR 0001: Authenticated presentation of Alloy-produced data
 
-Status: accepted for the unreleased Foundry boundary. Manifest preview is
-implemented; diagnostic presentation and telemetry/report import are future
-work. [Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/issues/27),
-which tracked consumer adoption, closed on 2026-10-06; no open issue tracks
-this remaining work.
+Status: accepted. Manifest preview and gateway diagnostic reference lookup
+are implemented. Alloy telemetry and diagnostic report import is not
+implemented. [Alloy issue 27](https://github.com/ferrum-edge/ferrum-alloy/issues/27),
+which tracked consumer adoption, closed on 2026-10-06.
 
 ## Context
 
@@ -60,15 +59,37 @@ Alloy producer rules. Its authenticated BFF route is read-only for every role,
 requires a matching authorized namespace, makes no upstream call and returns
 only desired resource fields and an informational summary. TLS paths are
 redacted metadata and are never read. No manifest URL or OpenAPI file is loaded.
-There is no telemetry ingestion, report importer, diagnostic lookup, trace
-query, persistent plan or automatic gateway application in this implementation.
+There is no telemetry ingestion, report importer, trace query, persistent plan
+or automatic gateway application in this implementation.
+
+The **diagnostic reference lookup** (`server/routes/diagnostics.ts`, the
+Status page's Diagnostic reference lookup card) resolves an Edge
+`X-Ferrum-Diagnostic-Ref` through `GET /diagnostics/v1/refs/{ref}` on the
+deployment's `FERRUM_ADMIN_URL`, within this decision:
+
+- The browser sends one reference matching `fd1_<32 hex>` or
+  `fd2_<8 hex>_<32 hex>` and its tab's `X-Ferrum-Namespace`; a query string,
+  an escaped reference or any other shape is refused before anything is sent.
+- Edge requires the `diagnostics:read` scope and an `ns` claim. No role
+  implies the scope. Only roles listed in `FERRUM_DIAGNOSTICS_ROLES` (empty by
+  default) receive it, on a token minted for that one lookup (at most 60
+  seconds) and bound to the one namespace the session is granted. The UI hides
+  the card from other roles, and the route refuses them regardless.
+- The budgets above are enforced: 4 KiB request target, one namespace, 64 KiB
+  read before parsing, eight nesting levels, a five-second absolute deadline,
+  and at most two lookups per principal and eight overall in flight.
+- The answer is a reviewed projection of `DiagnosticRefLookup` with strings
+  bounded to 256 characters, at most eight attempts, and the backend target
+  reduced to `scheme://host:port`. Failures are fixed messages with fixed
+  codes; a gateway body never reaches the browser. A miss stays a miss (`404`,
+  with the owning replica when Edge names one), a refusal stays a denial.
 
 The published `contracts-edge-0.9.21` metadata marks the shared manifest and
 diagnostic report EXISTING/implemented after root's accepted owner/consumer
 qualification. Foundry adopts the exact manifest schema and fixtures, with
 owner-unreleased availability and historical descriptions retained. Alloy crate
 publication and coordinated adoption were separate decisions, tracked by
-issue 27 until it closed; diagnostic presentation stays future work here.
+issue 27 until it closed.
 Normal resource editor saves are separately approved operations with the
 existing gateway-qualified behavior.
 
