@@ -51,6 +51,7 @@ from the commit.
 | `authorization.spec.ts` | Can anyone reach a surface they were not granted — unauthenticated, unmapped, or by sending their own identity headers? Is a read the gateway withholds from a role shown as a denial rather than as empty data? |
 | `namespace-isolation.spec.ts` | Can one tenant's configuration appear under another — including when both namespaces hold the same id — across reads, writes, deletes, switches, and a late or failed read? |
 | `lifecycle.spec.ts` | Does an edit or a delete leave the gateway in the state the UI claimed? |
+| `two-session-edit.spec.ts` | When two operators edit the same proxy, is the stale save refused instead of reverting the other's change, and can it be redone after a reload? |
 | `read-failures.spec.ts` | Does a transient failure recover quietly, and does an unavailable read stay distinguishable from an empty one? |
 | `interrupted-write.spec.ts` | When the outcome of a write is genuinely unknown, is it reported rather than replayed? |
 | `content-security-policy.spec.ts` | Do the styles Radix injects at runtime (scroll lock, Select viewport) apply under a `style-src` with no `'unsafe-inline'`, with no CSP violation? |

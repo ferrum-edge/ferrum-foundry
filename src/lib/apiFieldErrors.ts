@@ -38,6 +38,8 @@ export function parseFieldError(
   const validationPrefixes = [
     ["ocsp_der_base64", "ocsp_der_base64 must be valid base64:"],
     ["jwks_json", "jwks_json must be valid JSON:"],
+    // Edge v0.9.21 and 1.0.0 (`tls_management.rs`): JSON that is not a usable JWKS.
+    ["jwks_json", "jwks_json is not a usable key set:"],
   ] as const;
   const validationPrefix = validationPrefixes.find(([, prefix]) => detail.startsWith(prefix));
   const field = certificatePair ? "cert_pem" : validationPrefix?.[0];

@@ -253,7 +253,7 @@ const SURFACES: Record<CapabilitySurface, SurfaceDescriptor> = {
   tlsMaterial: {
     label: "Managed TLS material",
     headline: "Managed TLS material is read-only",
-    action: "upload or delete managed TLS material",
+    action: "upload, rotate, or delete managed TLS material",
     minimumRole: "admin",
     // `admit_non_config_db_write`: the managed TLS / ACME stores are refused in
     // a read-only mode but are not subject to the config-DB failover gate that

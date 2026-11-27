@@ -188,28 +188,28 @@ update the marker. A new Edge route is refused to scoped sessions until
 | `POST` | `/admin/tls/acme/orders/{id}/finalize` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `GET` | `/admin/tls/certificates` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `POST` | `/admin/tls/certificates` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
-| `GET` | `/admin/tls/certificates/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
-| `PUT` | `/admin/tls/certificates/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
+| `GET` | `/admin/tls/certificates/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: re-read just before the replacement, refused if the record changed). Fleet-global. |
+| `PUT` | `/admin/tls/certificates/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: the in-place replacement Foundry uses; a referenced record cannot be deleted). Fleet-global. |
 | `DELETE` | `/admin/tls/certificates/{id}` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `GET` | `/admin/tls/ca-bundles` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `POST` | `/admin/tls/ca-bundles` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
-| `GET` | `/admin/tls/ca-bundles/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
-| `PUT` | `/admin/tls/ca-bundles/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
+| `GET` | `/admin/tls/ca-bundles/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: re-read just before the replacement, refused if the record changed). Fleet-global. |
+| `PUT` | `/admin/tls/ca-bundles/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: the in-place replacement Foundry uses; a referenced record cannot be deleted). Fleet-global. |
 | `DELETE` | `/admin/tls/ca-bundles/{id}` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `GET` | `/admin/tls/crls` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `POST` | `/admin/tls/crls` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
-| `GET` | `/admin/tls/crls/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
-| `PUT` | `/admin/tls/crls/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
+| `GET` | `/admin/tls/crls/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: re-read just before the replacement, refused if the record changed). Fleet-global. |
+| `PUT` | `/admin/tls/crls/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: the in-place replacement Foundry uses; a referenced record cannot be deleted). Fleet-global. |
 | `DELETE` | `/admin/tls/crls/{id}` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `GET` | `/admin/tls/ocsp-responses` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `POST` | `/admin/tls/ocsp-responses` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
-| `GET` | `/admin/tls/ocsp-responses/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
-| `PUT` | `/admin/tls/ocsp-responses/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
+| `GET` | `/admin/tls/ocsp-responses/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: re-read just before the replacement, refused if the record changed). Fleet-global. |
+| `PUT` | `/admin/tls/ocsp-responses/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: the in-place replacement Foundry uses; a referenced record cannot be deleted). Fleet-global. |
 | `DELETE` | `/admin/tls/ocsp-responses/{id}` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `GET` | `/admin/tls/jwks` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `POST` | `/admin/tls/jwks` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
-| `GET` | `/admin/tls/jwks/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
-| `PUT` | `/admin/tls/jwks/{id}` | Unused | Refused | Managed TLS records are listed, uploaded and deleted, never read or replaced one by one. Fleet-global. |
+| `GET` | `/admin/tls/jwks/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: re-read just before the replacement, refused if the record changed). Fleet-global. |
+| `PUT` | `/admin/tls/jwks/{id}` | UI | Refused | `src/api/tls.ts` (TLS page, Rotate: the in-place replacement Foundry uses; a referenced record cannot be deleted). Fleet-global. |
 | `DELETE` | `/admin/tls/jwks/{id}` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `POST` | `/admin/tls/rotate/{surface}` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
 | `POST` | `/admin/tls/validate` | UI | Refused | `src/api/tls.ts` (TLS page). Fleet-global. |
@@ -262,9 +262,13 @@ Operators who need it call the Edge admin API directly with their own
   ceiling (least privilege), as was the equally unused
   `GET /backend-egress-policy`. An unrestricted session can still reach them
   through the transparent proxy; they carry no Foundry compatibility promise.
-- `GET /live`, `GET /status`, `GET /gateway-trust-bundles/{id}`, and `GET`/`PUT`
-  of one managed TLS record are ordinary reads or writes Foundry happens not to
-  need. `GET /gateway-trust-bundles/{id}` stays inside the ceiling's resource
+- `GET /live`, `GET /status` and `GET /gateway-trust-bundles/{id}` are reads
+  Foundry does not need: its own `/api/health` endpoints are the probes, the
+  Status page reads `/health`, and the trust manager edits from the list read.
+- Managed TLS records are replaced with `PUT /admin/tls/{collection}/{id}`.
+  Edge also replaces a same-kind record through the collection `POST` when the
+  request names its `id` and sets `allow_overwrite: true`; Foundry's upload
+  never sends that flag, so an upload can never overwrite a record by accident. `GET /gateway-trust-bundles/{id}` stays inside the ceiling's resource
   item class: it reads one bundle of a granted namespace, which the session
   can already read through the list Foundry uses, so it grants nothing new,
   and narrowing the class would only split one route pattern for no gain. `GET /diagnostics/v1/refs/{ref}` is unused because Foundry has no
