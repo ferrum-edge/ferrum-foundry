@@ -279,6 +279,19 @@ jobs:
           FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
         run: npm run test:gateway-contract
 
+      - name: Measure 1,000-record collections through the BFF
+        # Seeds 1,000 proxies and 1,000 upstreams in a disposable namespace and
+        # reads them back through Foundry's BFF as the UI does (list pages, one
+        # editor, complete traversals). Correctness is asserted; request
+        # counts, bytes and elapsed time go to the job summary.
+        env:
+          FERRUM_SCALE_GATEWAY_CONTRACT: 'true'
+          FERRUM_SCALE_RECORDS: '1000'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+        run: npm exec -- vitest run --project server server/routes/scale.gateway.test.ts
+
       - name: Verify role and read-only capability parity
         id: parity
         if: steps.ready.outcome == 'success'
