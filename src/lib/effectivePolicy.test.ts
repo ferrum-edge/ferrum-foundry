@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Consumer, PluginConfig, Proxy } from "@/api/types";
+import { PLUGIN_DEFAULT_PRIORITY } from "./pluginChainOrder";
 import { pluginAppliesToProxy } from "./pluginProtocols";
 import {
   analyzeProxyPolicy,
@@ -72,13 +73,15 @@ function consumer(
 
 /**
  * A whole-collection oracle written from the gateway's scope merge (Ferrum
- * Edge v0.9.7 `src/plugin_cache.rs`: `remove_shadowed_global_plugin` and
- * `is_istio_route_transform_consumer`), not from the indexed implementation.
- * It scans the collection once for the scoped configurations this proxy
- * actually merges, drops every global those shadow by plugin name (size
- * limiters and the exact Istio route-transform consumer are additive), and
- * orders by priority then id. The indexed path must return the same plugins,
- * ordering, and sources.
+ * Edge v0.9.21 `src/plugin_cache.rs`: `remove_shadowed_globals`,
+ * `is_istio_route_transform_consumer` and `plugin_chain_order`), not from the
+ * indexed implementation. It scans the collection once for the scoped
+ * configurations this proxy actually merges, drops every global those shadow
+ * by plugin name (size limiters and the exact Istio route-transform consumer
+ * are additive), assembles globals, proxy-scoped and proxy-group
+ * configurations each in ascending id, and sorts that stably by effective
+ * priority and then plugin name. The indexed path must return the same
+ * plugins, ordering, and sources.
  */
 function referenceAttachedPlugins(
   proxy: Proxy,
@@ -117,19 +120,27 @@ function referenceAttachedPlugins(
       .map((plugin) => plugin.plugin_name),
   );
 
-  return pluginConfigs
-    .filter((plugin) => {
-      if (!plugin.enabled) return false;
-      if (plugin.scope === "global") return !shadowedNames.has(plugin.plugin_name);
-      return merged.includes(plugin);
-    })
-    .map((plugin) => ({ ...plugin, effectiveSource: plugin.scope }))
-    .sort(
-      (left, right) =>
-        (left.priority_override ?? Number.MAX_SAFE_INTEGER) -
-          (right.priority_override ?? Number.MAX_SAFE_INTEGER) ||
-        left.id.localeCompare(right.id),
-    );
+  const byId = (left: PluginConfig, right: PluginConfig) =>
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  const assembled = [
+    ...pluginConfigs
+      .filter((plugin) => plugin.enabled && plugin.scope === "global")
+      .filter((plugin) => !shadowedNames.has(plugin.plugin_name))
+      .sort(byId),
+    ...merged.filter((plugin) => plugin.scope === "proxy").sort(byId),
+    ...merged.filter((plugin) => plugin.scope === "proxy_group").sort(byId),
+  ];
+  const priorityOf = (plugin: PluginConfig) =>
+    plugin.priority_override ?? PLUGIN_DEFAULT_PRIORITY.get(plugin.plugin_name) ?? Infinity;
+  return assembled
+    .map((plugin, index) => ({ plugin, index }))
+    .sort((left, right) =>
+      priorityOf(left.plugin) - priorityOf(right.plugin) ||
+      (left.plugin.plugin_name < right.plugin.plugin_name ? -1
+        : left.plugin.plugin_name > right.plugin.plugin_name ? 1 : 0) ||
+      left.index - right.index,
+    )
+    .map(({ plugin }) => ({ ...plugin, effectiveSource: plugin.scope }));
 }
 
 describe("effective authorization policy", () => {
@@ -160,9 +171,10 @@ describe("effective authorization policy", () => {
     expect(mixed.consumers.map((c) => c.decision)).toEqual(["allowed", "conditional"]);
     expect(mixed.consumers[0]?.reasons).toEqual(["Matching credential for key_auth"]);
 
+    // Without an override basic_auth keeps its default priority (1300), so
+    // key_auth (10) still runs first and Alice's key settles it.
     const unordered = analyzeProxyPolicy(proxy(), [key, { ...basic, priority_override: null }], people);
-    expect(unordered.consumers[0]?.decision).toBe("conditional");
-    expect(unordered.consumers[0]?.reasons.join(" ")).toContain("execution order");
+    expect(unordered.consumers[0]?.decision).toBe("allowed");
   });
 
   it.each([
@@ -190,7 +202,7 @@ describe("effective authorization policy", () => {
     ], [consumer("1", "alice", [], {})]);
     const result = analysis.consumers[0]!;
     expect(result.decision).toBe("conditional");
-    for (const reason of ["omit basicauth", "External identity", "authentication plugins have request-dependent", "access-control trigger", "execution order"]) {
+    for (const reason of ["omit basicauth", "External identity", "authentication plugins have request-dependent", "access-control trigger", "single auth mode"]) {
       expect(result.reasons.join(" ")).toContain(reason);
     }
   });
@@ -226,7 +238,7 @@ describe("effective authorization policy", () => {
   it.each(["proxy-1", ""])(
     "does not count an attached proxy-group plugin with proxy_id %j",
     (proxyId) => {
-      // Ferrum Edge v0.9.7 merges a proxy-group config only when `proxy_id`
+      // Ferrum Edge v0.9.21 merges a proxy-group config only when `proxy_id`
       // is absent, so the excluded group ACL must neither apply nor shadow
       // the global ACL. Alice holds a key-auth credential: were the group
       // ACL merged, it would replace the global deny and she would read as
@@ -248,8 +260,8 @@ describe("effective authorization policy", () => {
       const alice = consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] });
 
       expect(effectivePluginsForProxy(target, plugins).map((entry) => entry.id)).toEqual([
-        "global-acl",
         "global-auth",
+        "global-acl",
       ]);
       const result = analyzeProxyPolicy(target, plugins, [alice]).consumers[0];
       expect(result?.decision).toBe("denied");
@@ -473,14 +485,14 @@ describe("effective authorization policy", () => {
       p1: ["direct-p1", "group-acl", "global-auth", "global-cors", "global-logging"],
       // p2's attached direct key_auth shadows the global key_auth. p1 lists
       // direct-p2 too, but it targets p2, so p1 keeps the global instance.
-      p2: ["direct-p2", "global-cors", "global-logging", "group-rate"],
-      s1: ["group-acl", "global-auth", "global-cors", "global-logging", "group-rate"],
+      p2: ["direct-p2", "global-cors", "group-rate", "global-logging"],
+      s1: ["group-acl", "global-auth", "global-cors", "group-rate", "global-logging"],
     };
     // A stream proxy runs only the stream-capable plugins it is attached to.
     const expectedEffective: Record<string, string[]> = {
       p1: expectedAttached.p1,
       p2: expectedAttached.p2,
-      s1: ["group-acl", "global-logging", "group-rate"],
+      s1: ["group-acl", "group-rate", "global-logging"],
     };
     const consumers = [
       consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] }),
@@ -621,8 +633,8 @@ describe("gateway scope merge: scoped instances shadow same-name globals", () =>
     const target = proxy({ plugins: [{ plugin_config_id: "scoped-rate" }] });
 
     expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([
-      "global-acl",
       "global-key",
+      "global-acl",
       "scoped-rate",
     ]);
     expect(analyzeProxyPolicy(target, plugins, [alice]).consumers[0]?.decision).toBe("denied");
@@ -672,7 +684,7 @@ describe("gateway scope merge: scoped instances shadow same-name globals", () =>
     ];
     const target = proxy({ plugins: attach.map((id) => ({ plugin_config_id: id })) });
 
-    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual(["global-acl", "global-key"]);
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual(["global-key", "global-acl"]);
     const analysis = analyzeProxyPolicy(target, plugins, [alice]);
     expect(analysis.consumers[0]?.decision).toBe("denied");
     expect(analysis.consumers[0]?.reasons).toEqual(["global-acl explicitly denies consumer alice"]);
@@ -691,10 +703,12 @@ describe("gateway scope merge: scoped instances shadow same-name globals", () =>
         plugins: [{ plugin_config_id: "scoped-limit" }, { plugin_config_id: "group-limit" }],
       });
 
+      // Equal priority and name: Edge's assembly order decides, globals,
+      // then proxy-scoped, then proxy-group instances.
       expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([
         "global-limit",
-        "group-limit",
         "scoped-limit",
+        "group-limit",
       ]);
       expectOracleParity(target, plugins);
     },
@@ -820,8 +834,8 @@ describe("gateway scope merge: scoped instances shadow same-name globals", () =>
     );
     expect(analyzeProxyPolicy(plainProxy, plugins, [alice]).consumers[0]?.decision).toBe("denied");
     expect(pluginAttachmentIndex(plugins).globals.map((entry) => entry.id)).toEqual([
-      "global-key",
       "global-acl",
+      "global-key",
     ]);
     expect(analyzeProxyPolicy(shadowedProxy, plugins, [alice]).consumers[0]?.decision).toBe(
       "allowed",
@@ -830,7 +844,7 @@ describe("gateway scope merge: scoped instances shadow same-name globals", () =>
 });
 
 describe("access_control without an identity source (#470)", () => {
-  // Ferrum Edge v0.9.7 `src/plugins/access_control.rs` `authorize_identity`
+  // Ferrum Edge v0.9.21 `src/plugins/access_control.rs` `authorize_identity`
   // rejects with 401 "No consumer identified" whenever neither a consumer nor
   // an authenticated identity was established, before any list is consulted.
   const bare = proxy({ id: "p", plugins: [] });
@@ -949,5 +963,58 @@ describe("access_control without an identity source (#470)", () => {
     ], people);
     expect(analysis.consumers.map((entry) => entry.decision)).toEqual(["allowed", "denied"]);
     expect(analysis.configurationProblems).toEqual([]);
+  });
+});
+
+describe("chain order and authentication mode (Ferrum Edge v0.9.21)", () => {
+  const keyed = consumer("1", "alice", [], { keyauth: [{ key: "[REDACTED]" }] });
+  const jwtOnly = consumer("2", "bob", [], { jwt: [{ secret: "[REDACTED]" }] });
+  const ids = (plugins: EffectivePlugin[]) => plugins.map((entry) => entry.id);
+
+  it("orders by default priority, then plugin name, then Edge's assembly order", () => {
+    const plugins = [
+      plugin("a-logging", "stdout_logging", "global"),
+      plugin("b-key", "key_auth", "global"),
+      plugin("c-cors", "cors", "global"),
+      plugin("d-rate", "rate_limiting", "proxy", {}, { proxy_id: "proxy-1" }),
+      plugin("e-jwt", "jwt_auth", "proxy_group"),
+      plugin("f-acl", "access_control", "global", { allowed_consumers: ["alice"] }, { priority_override: 1 }),
+      // Same priority as cors: `correlation_id` sorts before `cors` bytewise.
+      plugin("g-corr", "correlation_id", "global", {}, { priority_override: 100 }),
+    ];
+    const target = proxy({
+      plugins: [{ plugin_config_id: "e-jwt" }, { plugin_config_id: "d-rate" }],
+    });
+    expect(ids(effectivePluginsForProxy(target, plugins))).toEqual([
+      "f-acl", "g-corr", "c-cors", "e-jwt", "b-key", "d-rate", "a-logging",
+    ]);
+  });
+
+  it("refuses every Consumer when the only allow-list is allowed_external_identities", () => {
+    const plugins = [
+      plugin("key", "key_auth", "global"),
+      plugin("acl", "access_control", "global", {
+        allowed_external_identities: [{ identity: "svc-a" }],
+      }),
+    ];
+    const result = analyzeProxyPolicy(proxy({ plugins: [] }), plugins, [keyed]).consumers[0];
+    expect(result?.decision).toBe("denied");
+    expect(result?.reasons.join(" ")).toContain("allows only external identities");
+  });
+
+  it("settles a Consumer whose credential belongs to the first plugin in single mode", () => {
+    const plugins = [plugin("jwt", "jwt_auth", "global"), plugin("key", "key_auth", "global")];
+    // jwt_auth (1100) runs before key_auth (1200).
+    const single = analyzeProxyPolicy(proxy({ plugins: [] }), plugins, [jwtOnly, keyed]);
+    expect(single.consumers.map((entry) => entry.decision)).toEqual(["allowed", "conditional"]);
+    expect(single.consumers[1]?.reasons.join(" ")).toContain("single auth mode");
+    expect(single.consumers[1]?.reasons.join(" ")).toContain("jwt_auth, key_auth");
+    expect(single.conditional).toBe(true);
+
+    const multi = analyzeProxyPolicy(
+      proxy({ plugins: [], auth_mode: "multi" }), plugins, [jwtOnly, keyed],
+    );
+    expect(multi.consumers.map((entry) => entry.decision)).toEqual(["allowed", "allowed"]);
+    expect(multi.conditional).toBe(false);
   });
 });

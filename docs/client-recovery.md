@@ -157,7 +157,8 @@ Effective policy treats basic-auth credentials as unobservable. When no other
 matching credential is observed, access is shown as conditional with a reason.
 Explicit ACL denials still apply. Observed matching credentials keep their
 normal decisions, including request triggers, external identity mapping, and
-unknown execution order. Pure key-auth policies still distinguish observed
+the single-auth-mode case where a credential belongs to a plugin that runs
+after another authentication plugin. Pure key-auth policies still distinguish observed
 credentials from missing ones. Foundry never reads backup secrets to decide
 access. The pinned-gateway smoke test checks, with disposable synthetic
 credentials, that ordinary responses omit basic credentials and that backup

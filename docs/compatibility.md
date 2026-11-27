@@ -753,7 +753,8 @@ an early warning (ferrum-edge/ferrum-contracts#76). It runs weekly and on
   subset `traffic_policy` field comparisons against the Edge sources at that
   commit, plus the plugin trigger predicate lists Foundry redacts by
   (`TRIGGER_CLIENT_FIELD_PREDICATES` and `TRIGGER_VISIBLE_PREDICATES`, which
-  have no pinned counterpart: v0.9.20 does not project triggers)
+  have no pinned counterpart: v0.9.20 does not project triggers), and the
+  Edge source parity tables (below)
   (`scripts/edge-main-drift.mjs`;
   only content is compared, since the recorded refs never name a `main`
   commit), then the Pinned Gateway Contract job's gateway steps with
@@ -778,6 +779,29 @@ an early warning (ferrum-edge/ferrum-contracts#76). It runs weekly and on
 
 A finding is not a qualification result. It is time to ship a compatible
 Foundry release before Edge releases the change.
+
+### Edge source parity
+
+Three decisions Foundry takes from Edge's source, not from an admin API
+answer, are transcribed with the commit they were read at and re-read by
+`npm run check:edge-source-parity` (`scripts/edge-source-parity.mjs`) in the
+Pinned Gateway Contract job, and against Edge `main` by the Edge Main Drift
+workflow:
+
+| Foundry table | Edge source | What a stale copy breaks |
+| --- | --- | --- |
+| `PLUGIN_DEFAULT_PRIORITY` (`src/lib/pluginChainOrder.ts`) | `BUILTIN_PLUGIN_PARITY_META` in `src/plugins/builtin_parity.rs` | Effective policy orders each proxy's chain by it, which decides whether a Consumer is authenticated before another plugin can refuse it |
+| `EDGE_NAMESPACE_SCOPED_KINDS` and the allowlist digest (`server/proxy-path.ts`) | `namespace_scoped_resource_kind`, `ceiling_global_route_is_allowed` and `ns_claim_global_route_is_allowed` in `src/admin/mod.rs` | The BFF's namespace route ceiling: a scoped request reaches Edge only on a route class Edge treats as namespace-scoped |
+| `METRICS_MODES` and `NO_PROXY_STATE_MODES` (`src/lib/adminMetricsReporting.ts`) | `ADMIN_METRICS_MODES` and the proxy-serving modes of `contract_fixtures` in `src/admin/metrics.rs` | Which `/admin/metrics` values the Metrics page and Dashboard hide as placeholders |
+
+The parsers fail closed on a shape they do not understand. The allowlists are
+compared by digest (comments removed, whitespace collapsed), so any change to
+them means re-reading them. Behaviour is checked as well:
+`src/api/effectivePolicy.gateway.test.ts` (Pinned Gateway Contract step
+"Verify effective policy against the gateway") compares `analyzeProxyPolicy`
+with the data plane for a fixture of global, proxy-scoped and proxy-group
+`key_auth` and `access_control` plugins, including a shadowed global
+`key_auth` and an ACL whose only allow-list is `allowed_external_identities`.
 
 ## Changing the pairing
 
@@ -806,6 +830,11 @@ Moving the Edge pin is a re-qualification, not a tag edit:
    line and record the commit in `SUBSET_TRAFFIC_POLICY_SOURCE`:
    `scripts/subset-traffic-policy-drift.test.mjs` fails until it is the pinned
    one, and `npm run check:subset-traffic-policy` fails while the list differs.
+   Likewise re-read the three [Edge source parity](#edge-source-parity)
+   tables and record the commit in `PLUGIN_CHAIN_ORDER_SOURCE`,
+   `EDGE_NAMESPACE_ROUTE_SOURCE` and `ADMIN_METRICS_SOURCE`:
+   `scripts/edge-source-parity.test.mjs` fails until each is the pinned one,
+   and `npm run check:edge-source-parity` fails while a table differs.
 4. Review the actual hosted schema producer artifact before changing schema
    refs/digests, and adopt only a qualified, published canonical contract tag.
    Record pending qualification until every existing gate passes.
@@ -819,3 +848,71 @@ Moving the Edge pin is a re-qualification, not a tag edit:
 If the candidate fails, restore the previous `edge.image`, record the candidate
 in `edge.rejected_images` with its finding and CI run, and add it to
 [Evaluated and rejected](#evaluated-and-rejected).
+
+## The 1.0.0 release pull request
+
+Work that waits only on an upstream release, recorded here so the pull
+requests that pin Edge 1.0.0, re-pin ferrum-contracts and prepare Foundry
+1.0.0 carry it out instead of rediscovering it. Each item is code, not a
+known limitation; none may be dropped from those pull requests.
+
+**The Edge 1.0.0 pin.** Edge is adding four Admin API capabilities. Foundry
+adopts each one in the pin pull request, at these call sites:
+
+- **`q=` list search.** Searching a list page today loads the whole
+  collection and filters it in the browser (`filterAndPage` in
+  `src/lib/collectionSearch.ts`) on `src/routes/proxies/index.tsx`,
+  `src/routes/upstreams/index.tsx`, `src/routes/consumers/index.tsx`,
+  `src/routes/plugins/index.tsx` and `src/routes/api-specs/index.tsx`, each
+  switching from its one-page hook to the whole-collection one (`useProxies` /
+  `useAllProxies` in `src/hooks/useProxies.ts`, and the same pairs in
+  `useUpstreams.ts`, `useConsumers.ts`, `usePlugins.ts` and `useApiSpecs.ts`).
+  Send the search as `q=` on the one-page read (`list` in `src/api/proxies.ts`,
+  `upstreams.ts`, `consumers.ts` and `apiSpecs.ts`, `listConfigs` in
+  `plugins.ts`) and keep paging server-side.
+- **`applies_to_proxy=`.** Effective policy needs every global, proxy-scoped
+  and proxy-group configuration that can reach one proxy, so it reads the whole
+  plugin collection (`useAllPluginConfigs` → `plugins.listAllConfigs` in
+  `src/hooks/usePlugins.ts` and `src/api/plugins.ts`) for
+  `analyzeProxyPolicy` on `src/routes/proxies/$proxyId.tsx` and for each proxy
+  on `src/routes/consumers/$consumerId.tsx`. Read the proxy's configurations
+  with `applies_to_proxy=` instead (extend `plugins.listConfigsForProxy` and
+  `useProxyPluginConfigs`, which today send `proxy_id=`), keep refusing a
+  response the filter did not narrow, and keep `buildPluginAttachmentIndex`'s
+  scope merge as the check on what Edge returns. The proxy list's per-row
+  policy summary (`src/routes/proxies/index.tsx`, `useBoundedPluginConfigs`)
+  stays on the bounded collection read.
+- **A collection revision in `pagination`.** `collectBoundedPages` in
+  `src/api/pagination.ts` assembles a complete collection from pages read at
+  different moments. Compare the revision of every page with the first and
+  restart (or report unknown) when it changes, so a traversal is one snapshot;
+  `collectAllPages` and every `listAll` inherit it.
+- **`ids=`.** Rows on screen resolve their references one request per id:
+  `useUpstreamReferences` → `upstreams.getReference`
+  (`src/hooks/useUpstreams.ts`, `src/api/upstreams.ts`) and
+  `useProxyReferences` → `proxies.getReference` (`src/hooks/useProxies.ts`,
+  `src/api/proxies.ts`). Resolve them with one `ids=` read per page of rows.
+
+In the same pull request: classify the operations the new `openapi.yaml`
+adds in [Admin API coverage](admin-api-coverage.md) and move its marker
+(Edge `main` already serves `HEAD` on `/live`, `/health` and `/status`);
+bring the [Edge source parity](#edge-source-parity) tables in line (Edge
+`main` narrows `config` to exactly `/config/export` and `gateway-trust` to
+exactly `/gateway-trust/status` in `namespace_scoped_resource_kind`); and
+replace the managed TLS re-read guard in `replaceManagedRecord`
+(`src/api/tls.ts`) with the atomic precondition Edge provides for managed
+records.
+
+**The ferrum-contracts re-pin.** Add a parity test of `PLUGIN_SENSITIVITY`
+(`src/api/pluginSensitivity.ts`) against the contracts
+`plugin-config-sensitivity` vocabulary (ferrum-contracts#96) next to the
+existing Edge-source drift check.
+
+**The Foundry 1.0.0 release.** The release pull request records the
+envelope the Gateway Modes and Critical Journeys engine jobs qualify (the
+`tested` record and the qualification note in `compatibility.json`, which
+names every job in `QUALIFICATION_JOBS`), then follows the four-step
+sequence: the release pull request (record `candidate`, qualification
+pending), a qualification-only pull request recording `main`'s push run, the
+owner's `v1.0.0` tag, and the record pull request (status `released`, the
+immutable `v1.0.0.compatibility.json`, the starter digest).

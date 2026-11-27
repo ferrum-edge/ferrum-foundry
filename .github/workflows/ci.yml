@@ -186,6 +186,16 @@ jobs:
         # makes every upstream save that read it fail with 400.
         run: npm run check:subset-traffic-policy
 
+      - name: Verify the chain order, namespace route and metrics mode tables against the pinned Edge source
+        # Three decisions Foundry transcribes from Edge source: the default
+        # plugin priorities effective policy orders a chain by
+        # (src/lib/pluginChainOrder.ts), the routes Edge lets an ns-claim
+        # token reach (server/proxy-path.ts), and the modes whose
+        # /admin/metrics are placeholders (src/lib/adminMetricsReporting.ts).
+        # This re-reads each at edge.source_commit and fails on a difference
+        # or a stale recorded commit.
+        run: npm run check:edge-source-parity
+
       - name: Verify the Admin API coverage table against the pinned Edge spec
         # docs/admin-api-coverage.md classifies every operation in Edge's
         # openapi.yaml (used by the UI, forwarded but unused, or denied by the
@@ -325,6 +335,22 @@ jobs:
           FERRUM_NAMESPACE: ferrum-foundry-demo
           FERRUM_CAPABILITY_EXPECT: read-only
         run: node scripts/capability-parity-contract.mjs
+
+      - name: Verify effective policy against the gateway
+        # Foundry's effective policy against the data plane: for a fixture of
+        # global, proxy-scoped and proxy-group key_auth and access_control
+        # plugins, every Consumer analyzeProxyPolicy admits must reach the
+        # backend and every one it refuses must get 401 or 403. The fixture
+        # is removed afterwards.
+        env:
+          FERRUM_EFFECTIVE_POLICY_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_DEMO_BACKEND_HOST: host.docker.internal
+          FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
+        run: npm exec -- vitest run --project frontend src/api/effectivePolicy.gateway.test.ts
 
       - name: Show gateway logs on failure
         if: failure()

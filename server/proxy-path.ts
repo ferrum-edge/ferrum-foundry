@@ -3,6 +3,7 @@ import type { FastifyRequest } from 'fastify';
 const UNSAFE_SEGMENT_CHARACTER_PATTERN = /[%/\\]/;
 const CONSUMER_VERIFICATION_PATH_PATTERN = /^\/consumers\/[^/]+\/verification\/?$/;
 
+const LEADING_SLASHES_PATTERN = /^\/+/;
 const MAX_DECODE_PASSES = 8;
 const PROXY_PREFIX = '/api/proxy/';
 const targetPaths = new WeakMap<FastifyRequest, string>();
@@ -21,7 +22,7 @@ const targetPaths = new WeakMap<FastifyRequest, string>();
 // Foundry uses none of them, so they are not listed and a scoped principal is
 // refused (docs/admin-api-coverage.md). An unrestricted session is not subject
 // to this ceiling.
-const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
+export const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   [
     'GET|POST',
     /^\/(proxies|upstreams|consumers|plugins\/config|api-specs|gateway-trust-bundles)\/?$/,
@@ -41,6 +42,83 @@ const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['POST', /^\/restore\/?$/],
   ['GET', /^\/backup\/?$/],
 ];
+
+/**
+ * Where `EDGE_NAMESPACE_SCOPED_KINDS` and the allowlist digest were read.
+ * `npm run check:edge-source-parity` (`scripts/edge-source-parity.mjs`) re-reads
+ * `path` at `edge.source_commit` in the Pinned Gateway Contract job, and at
+ * Edge `main` in the Edge Main Drift workflow, and fails when Edge's match
+ * arms differ from the table, when the bodies of
+ * `ceiling_global_route_is_allowed` and `ns_claim_global_route_is_allowed`
+ * no longer hash to `allowlistDigest` (comments removed, whitespace collapsed),
+ * or when `commit` is not the checked commit.
+ */
+export const EDGE_NAMESPACE_ROUTE_SOURCE = {
+  repository: 'ferrum-edge/ferrum-edge',
+  path: 'src/admin/mod.rs',
+  release: 'v0.9.21',
+  commit: 'f9915358c8032214f4034a17c28cdf72d14006c3',
+  allowlistFunctions: ['ceiling_global_route_is_allowed', 'ns_claim_global_route_is_allowed'],
+  allowlistDigest: 'd9dcbb9c50b2698897a9cd8b27c6b5a8357054f08e5e885576671d1de75eebf0',
+} as const;
+
+/** Each match guard Edge uses, as Rust text without whitespace, and what it tests. */
+const EDGE_KIND_GUARDS = {
+  'segments.len()==1': (segments: readonly string[]) => segments.length === 1,
+  'segments.len()>1': (segments: readonly string[]) => segments.length > 1,
+  'segments.get(1)==Some(&"export")': (segments: readonly string[]) => segments[1] === 'export',
+} as const;
+
+export interface EdgeNamespaceScopedKind {
+  /** The first path segment Edge matches. */
+  segment: string;
+  /** The arm's `if` guard as Rust text without whitespace, or null. */
+  guard: keyof typeof EDGE_KIND_GUARDS | null;
+  /** The resource-kind label Edge returns. */
+  kind: string;
+  /** Whether the BFF lets a namespace-scoped principal reach this route class. */
+  exposed: boolean;
+}
+
+/**
+ * Edge's `namespace_scoped_resource_kind`, arm by arm in match order: the
+ * routes where `X-Ferrum-Namespace` selects a tenant, so Edge authorizes an
+ * `ns`-claim token by name instead of refusing it as fleet-global. A scoped
+ * request reaches Edge only when its route class is `exposed` here *and*
+ * `NAMESPACE_SCOPED_ROUTES` lists the exact method and path, so a kind Edge
+ * stops classifying as namespace-scoped is refused as soon as this table
+ * follows it. Withheld (least privilege, docs/admin-api-coverage.md): `/batch`,
+ * `/deployment-snapshot` (refused to every session), `/backend-egress-policy`
+ * and `/config/export`.
+ */
+export const EDGE_NAMESPACE_SCOPED_KINDS: readonly EdgeNamespaceScopedKind[] = [
+  { segment: 'proxies', guard: null, kind: 'proxies', exposed: true },
+  { segment: 'consumers', guard: null, kind: 'consumers', exposed: true },
+  { segment: 'upstreams', guard: null, kind: 'upstreams', exposed: true },
+  { segment: 'api-specs', guard: null, kind: 'api-specs', exposed: true },
+  { segment: 'batch', guard: null, kind: 'batch', exposed: false },
+  { segment: 'backup', guard: null, kind: 'backup', exposed: true },
+  { segment: 'deployment-snapshot', guard: null, kind: 'deployment-snapshot', exposed: false },
+  { segment: 'backend-egress-policy', guard: 'segments.len()==1', kind: 'backend-egress-policy', exposed: false },
+  { segment: 'config', guard: 'segments.get(1)==Some(&"export")', kind: 'config-export', exposed: false },
+  { segment: 'restore', guard: null, kind: 'restore', exposed: true },
+  { segment: 'audit', guard: null, kind: 'audit', exposed: true },
+  { segment: 'gateway-trust-bundles', guard: null, kind: 'gateway-trust-bundles', exposed: true },
+  { segment: 'gateway-trust', guard: null, kind: 'gateway-trust', exposed: true },
+  { segment: 'plugins', guard: 'segments.len()>1', kind: 'plugins', exposed: true },
+];
+
+/**
+ * The arm of Edge's `namespace_scoped_resource_kind` that classifies `path`,
+ * or undefined when Edge treats it as fleet-global. Segments are split as Edge
+ * splits them (`path.trim_start_matches('/').split('/')`), so a trailing slash
+ * is an empty last segment.
+ */
+export function edgeNamespaceScopedKind(path: string): EdgeNamespaceScopedKind | undefined {
+  const segments = path.replace(LEADING_SLASHES_PATTERN, '').split('/');
+  return EDGE_NAMESPACE_SCOPED_KINDS.find((arm) =>
+    arm.segment === segments[0] && (arm.guard === null || EDGE_KIND_GUARDS[arm.guard](segments)));
+}
 
 // Fleet-wide route classes a namespace-scoped principal may reach without a
 // granted namespace header: Edge's `ns`-claim allowlist, less the routes the
@@ -62,7 +140,7 @@ const NAMESPACE_SCOPED_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
 //   rotation and validation; `/cluster`; `/config/apply-status`; `/metrics*`
 //   and `/admin/metrics`; `/charges*`; `/backend-capabilities*`; `/mesh/*`; and
 //   the waypoint routes.
-const NAMESPACE_SAFE_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
+export const NAMESPACE_SAFE_GLOBAL_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ['GET', /^\/plugins$/],
   ['GET|POST', /^\/namespaces$/],
   ['GET|PUT|DELETE', /^\/namespaces\/[^/]+$/],
@@ -208,7 +286,8 @@ export function proxyPathIsAllowedForNamespace(request: FastifyRequest): boolean
     const method = classifiedMethod(request);
     const routeAllowed = ([methods, pattern]: readonly [string, RegExp]) =>
       methods.split('|').includes(method) && pattern.test(path);
-    return NAMESPACE_SAFE_GLOBAL_ROUTES.some(routeAllowed) || NAMESPACE_SCOPED_ROUTES.some(routeAllowed);
+    if (NAMESPACE_SAFE_GLOBAL_ROUTES.some(routeAllowed)) return true;
+    return NAMESPACE_SCOPED_ROUTES.some(routeAllowed) && edgeNamespaceScopedKind(path)?.exposed === true;
   } catch {
     return false;
   }

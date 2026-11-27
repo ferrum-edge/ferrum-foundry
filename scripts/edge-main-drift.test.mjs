@@ -14,12 +14,14 @@ import {
 import { digestOf, extractSchemaBlock } from "./plugin-schema-drift.mjs";
 import { PLUGIN_SCHEMA_SPEC } from "../src/lib/pluginSchemas.ts";
 import { PLUGIN_SENSITIVITY_SOURCE } from "../src/api/pluginSensitivity.ts";
+import { EDGE_SOURCE_TRANSCRIPTIONS } from "./edge-source-parity.mjs";
 
 const KEY_AUTH_CHANGED_PATTERN = /component `KeyAuthConfig`: changed/;
 const RATE_LIMITING_MISSING_PATTERN = /component `RateLimitingConfig`: missing/;
 const CORS_MISSING_PATTERN = /entry `cors`: missing/;
 const UNKNOWN_SENSITIVITY_PATTERN = /unreadable \(FieldSensitivity::QuantumSealed is not one Foundry implements/;
 const FORTY_HEX_PATTERN = /expected a 40-hex Edge commit/;
+const SOURCE_UNREADABLE_PATTERN = /`src\/plugins\/builtin_parity\.rs`: unreadable: /;
 const SUBSET_MISSING_PATTERN =
   /component `SubsetTrafficPolicy` readOnly fields: missing `max_retries`/;
 const TRIGGER_MISSING_PATTERN =
@@ -289,7 +291,13 @@ test("fetches both Edge sources at the given commit and refuses anything else", 
   assert.deepEqual(fetched.sort(), [
     [PLUGIN_SCHEMA_SPEC.path, commit],
     [PLUGIN_SENSITIVITY_SOURCE.path, commit],
+    ...EDGE_SOURCE_TRANSCRIPTIONS.map(({ source }) => [source.path, commit]),
   ].sort());
+  // The fixture serves no Edge source parity file, so those parsers report
+  // it unreadable: a drift finding, never a silent pass.
+  assert.equal(result.drifted, true);
+  assert.ok(Object.values(result.sources).every((findings) => findings.length > 0));
+  assert.match(driftMarkdown(result), SOURCE_UNREADABLE_PATTERN);
   await assert.rejects(edgeMainDriftAt("main", { fetchSource }), FORTY_HEX_PATTERN);
   await assert.rejects(edgeMainDriftAt(undefined, { fetchSource }), FORTY_HEX_PATTERN);
 });
@@ -329,6 +337,7 @@ const REPLACED = new Set([
   "Upload the hosted schema producer export",
   "Verify the plugin sensitivity table against the pinned Edge source",
   "Verify the server-owned subset traffic_policy fields against the pinned Edge spec",
+  "Verify the chain order, namespace route and metrics mode tables against the pinned Edge source",
   // Coverage classifies the pinned release's operations; Edge main may add
   // routes Foundry has not classified yet without that being drift.
   "Verify the Admin API coverage table against the pinned Edge spec",
@@ -340,7 +349,7 @@ const RENAMED = new Map([["Start pinned Ferrum Edge gateway", "Start Ferrum Edge
 const OWN = [
   "Install Cosign",
   "Resolve the Ferrum Edge main image",
-  "Compare the plugin schemas, sensitivity table and server-owned subset fields with Edge main",
+  "Compare the plugin schemas, sensitivity table, server-owned subset fields and Edge source tables with Edge main",
   "Verify the editors' save payloads against the gateway",
   "Write the report",
 ];
