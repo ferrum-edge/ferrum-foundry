@@ -6,6 +6,8 @@ import { ResourceLabels } from "@/components/shared/ResourceLabels";
 
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { GeneratedResourceNotice, PluginDetailLink } from "@/components/shared/GeneratedResource";
+import { isAddressableResourceId } from "@/lib/resourceId";
 import { useProxy, useUpdateProxy, useDeleteProxy } from "@/hooks/useProxies";
 import { useAllPluginConfigs, useProxyPluginConfigs } from "@/hooks/usePlugins";
 import { useUpstream } from "@/hooks/useUpstreams";
@@ -74,6 +76,7 @@ export default function ProxyDetailPage() {
     onStale: () => toast("warning", STALE_EDITOR_MESSAGE),
   });
 
+  if (!isAddressableResourceId(proxyId)) return <GeneratedResourceNotice kind="Proxy" id={proxyId} />;
   return <ProxyEditor key={session.key} session={session} />;
 }
 
@@ -409,14 +412,13 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                       </h3>
                       <div className="flex flex-wrap gap-2">
                         {(proxy.plugins ?? []).map((assoc) => (
-                          <Link
+                          <PluginDetailLink
                             key={assoc.plugin_config_id}
-                            to="/plugins/$pluginId"
-                            params={{ pluginId: assoc.plugin_config_id }}
+                            pluginId={assoc.plugin_config_id}
                             className="font-mono text-xs text-orange hover:text-orange-light transition-colors"
                           >
                             <Badge variant="orange">{assoc.plugin_config_id}</Badge>
-                          </Link>
+                          </PluginDetailLink>
                         ))}
                       </div>
                     </Card>
@@ -424,10 +426,9 @@ function ProxyEditor({ session }: { session: EditorSession }) {
 
                   {/* Scoped plugin configs */}
                   {proxyPlugins.map((plugin: PluginConfig) => (
-                    <Link
+                    <PluginDetailLink
                       key={plugin.id}
-                      to="/plugins/$pluginId"
-                      params={{ pluginId: plugin.id }}
+                      pluginId={plugin.id}
                       className="block"
                     >
                       <Card className="hover:border-orange/40 transition-colors cursor-pointer">
@@ -441,7 +442,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                         </div>
                         <PluginConfigPreview config={plugin.config} />
                       </Card>
-                    </Link>
+                    </PluginDetailLink>
                   ))}
                 </>
               )}
@@ -458,10 +459,9 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                   </p>
                   <div className="space-y-2">
                     {skippedPlugins.map((plugin) => (
-                      <Link
+                      <PluginDetailLink
                         key={plugin.id}
-                        to="/plugins/$pluginId"
-                        params={{ pluginId: plugin.id }}
+                        pluginId={plugin.id}
                         className="block rounded-lg border border-border p-3 opacity-70 hover:opacity-100 transition-opacity"
                       >
                         <div className="flex items-center justify-between mb-2">
@@ -471,7 +471,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                           <Badge variant="default">HTTP only</Badge>
                         </div>
                         <PluginConfigPreview config={plugin.config} />
-                      </Link>
+                      </PluginDetailLink>
                     ))}
                   </div>
                 </Card>
@@ -491,10 +491,9 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                   </p>
                   <div className="space-y-2">
                     {idleTargeting.map(({ plugin, attached }) => (
-                      <Link
+                      <PluginDetailLink
                         key={plugin.id}
-                        to="/plugins/$pluginId"
-                        params={{ pluginId: plugin.id }}
+                        pluginId={plugin.id}
                         className="block rounded-lg border border-border p-3 opacity-70 hover:opacity-100 transition-opacity"
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -507,7 +506,7 @@ function ProxyEditor({ session }: { session: EditorSession }) {
                           </span>
                         </div>
                         <p className="font-mono text-xs text-text-muted mt-1">{plugin.id}</p>
-                      </Link>
+                      </PluginDetailLink>
                     ))}
                   </div>
                 </Card>

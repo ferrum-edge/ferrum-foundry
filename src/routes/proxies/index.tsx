@@ -11,6 +11,8 @@ import { usePaginationParams } from "@/hooks/usePagination";
 import { Button } from "@/components/ui/Button";
 import { GRID_HEADER_CLASS, GRID_ROW_CLASS, ResourceGrid } from "@/components/ui/ResourceGrid";
 import { Badge } from "@/components/ui/Badge";
+import { GeneratedResourceBadge } from "@/components/shared/GeneratedResource";
+import { GENERATED_RESOURCE_EXPLANATION, isAddressableResourceId } from "@/lib/resourceId";
 import { SearchBar } from "@/components/shared/SearchBar";
 import { PaginationControls } from "@/components/shared/PaginationControls";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -308,7 +310,9 @@ export default function ProxiesPage() {
               <button
                 key={proxy.id}
                 type="button"
-                className={`${GRID_TEMPLATE} ${GRID_ROW_CLASS} w-full text-left hover:bg-bg-card-hover transition-colors cursor-pointer`}
+                className={`${GRID_TEMPLATE} ${GRID_ROW_CLASS} w-full text-left ${isAddressableResourceId(proxy.id) ? "hover:bg-bg-card-hover transition-colors cursor-pointer" : "cursor-default"}`}
+                disabled={!isAddressableResourceId(proxy.id)}
+                title={isAddressableResourceId(proxy.id) ? undefined : GENERATED_RESOURCE_EXPLANATION}
                 onClick={() =>
                   navigate({
                     to: "/proxies/$proxyId",
@@ -332,6 +336,7 @@ export default function ProxiesPage() {
                       {proxy.id}
                     </span>
                   )}
+                  {!isAddressableResourceId(proxy.id) && <GeneratedResourceBadge />}
                 </div>
 
                 {/* Listen path, or listen port for a stream proxy */}

@@ -1437,6 +1437,16 @@ export const server = createServer(async (req, res) => {
 
   /* cluster & capabilities */
   if (path === '/cluster') return send(200, cluster);
+  // A control plane or node agent holds no proxy state; Edge answers the
+  // backend capability routes and the mesh egress scope with typed 503s.
+  if (NO_PROXY_STATE_MODES.has(GATEWAY_MODE)) {
+    if (path === '/backend-capabilities' || path === '/backend-capabilities/refresh') {
+      return send(503, { error: 'proxy_state unavailable in this mode' });
+    }
+    if (path === '/mesh/egress-scope' || path === '/mesh/egress-scope/test') {
+      return send(503, { error: 'No proxy state available' });
+    }
+  }
   if (path === '/backend-capabilities' && method === 'GET') return send(200, backendCapabilities);
   if (path === '/backend-capabilities/refresh') return send(200, { status: 'refreshed' });
 

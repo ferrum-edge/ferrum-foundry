@@ -35,7 +35,12 @@ workflow (`.github/workflows/ci.yml`) has passed:
    and that oauth2-proxy believes forwarded headers only from the stack's own
    subnet ([production profile](../e2e/README.md#the-production-profile)).
    Release qualification requires it with the other pairing gates
-   (`QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs`).
+   (`QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs`), among them
+   **Critical Journeys (firefox)** and **(webkit)**, the same journeys in
+   Playwright's Firefox and WebKit, and **Gateway Modes** (file, CP + DP,
+   mesh, PostgreSQL, MySQL, MongoDB): the pinned image in each mode, checked
+   for capability parity and every page read through the BFF
+   ([tested support](compatibility.md#tested-support)).
 4. **Container Gate** (amd64 and arm64): builds the release Dockerfile, checks
    that a planted `.env` canary is absent from image history and layers,
    requires a numeric non-root user and runs Node as the entrypoint to prove

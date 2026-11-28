@@ -19,6 +19,18 @@ import { defineConfig, devices } from "@playwright/test";
 
 const FOUNDRY_URL = process.env.FOUNDRY_URL ?? "http://127.0.0.1:8088";
 
+const ENGINES = {
+  chromium: { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+  firefox: { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+  webkit: { name: "webkit", use: { ...devices["Desktop Safari"] } },
+} as const;
+type Engine = keyof typeof ENGINES;
+const requested = process.env.FERRUM_E2E_BROWSER ?? "chromium";
+if (!Object.hasOwn(ENGINES, requested)) {
+  throw new Error(`FERRUM_E2E_BROWSER must be one of ${Object.keys(ENGINES).join(", ")}`);
+}
+const E2E_BROWSER = requested as Engine;
+
 export default defineConfig({
   testDir: "./e2e/journeys",
   globalSetup: "./e2e/support/global-setup.ts",
@@ -48,11 +60,9 @@ export default defineConfig({
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
   },
-  projects: [
-    {
-      // One explicitly supported browser to start with, as the issue scopes.
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
-  ],
+  // Chromium is the Critical Journeys gate. CI's "Critical Journeys
+  // (firefox|webkit)" jobs run the same suite in Playwright's other engines by
+  // setting FERRUM_E2E_BROWSER; one engine per run, so the shared namespace
+  // and fault forwarder are never driven by two browsers at once.
+  projects: [ENGINES[E2E_BROWSER]],
 });

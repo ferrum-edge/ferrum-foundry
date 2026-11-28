@@ -360,6 +360,129 @@ jobs:
           docker logs ferrum-edge-read-only
           cat /tmp/ferrum-demo-backend.log
 
+  gateway-modes:
+    # The pinned Edge image in every gateway mode Foundry claims besides
+    # database-on-SQLite (Pinned Gateway Contract): file mode, a CP + DP pair,
+    # a mesh sidecar on a local mesh document, and database mode on PostgreSQL,
+    # MySQL and MongoDB. Each gateway starts from an empty database or a fresh
+    # file.
+    name: Gateway Modes (${{ matrix.mode }})
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [file, cp-dp, mesh, postgres, mysql, mongodb]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Resolve the pinned Ferrum Edge image
+        run: |
+          image="$(node scripts/supported-pairing.mjs edge-image)"
+          echo "FERRUM_EDGE_IMAGE=${image}" >> "$GITHUB_ENV"
+
+      - name: Start demo backends
+        run: |
+          FERRUM_DEMO_BACKEND_BIND=0.0.0.0 node scripts/demo-backend.mjs >/tmp/ferrum-demo-backend.log 2>&1 &
+          for port in 9101 9102 9103 9104 9105; do
+            for _attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            curl --fail --silent --show-error "http://127.0.0.1:${port}/health" >/dev/null
+          done
+
+      - name: Start the gateway in this mode
+        id: up
+        run: scripts/gateway-modes/up.sh "${{ matrix.mode }}"
+
+      # Each check below runs once the gateway is up, whatever an earlier check
+      # concluded, so one failure never hides another mode's results.
+      - name: Seed twice and verify canonical backup state on this database
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && (matrix.mode == 'postgres' || matrix.mode == 'mysql' || matrix.mode == 'mongodb') }}
+        env:
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_DEMO_CONFIRM_TARGET: 'http://127.0.0.1:9000#ferrum-foundry-demo'
+          FERRUM_DEMO_BACKEND_HOST: host.docker.internal
+          FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
+          FERRUM_DEMO_INCLUDE_BASIC_AUTH: "true"
+        run: npm run test:gateway-contract
+
+      - name: Write through Foundry on the control plane and see the data plane serve it
+        # A proxy created through the BFF on the CP must reach the DP within a
+        # bounded wait: its admin API serves it and its data plane routes it.
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && matrix.mode == 'cp-dp' }}
+        env:
+          FERRUM_CP_DP_SYNC_GATEWAY_CONTRACT: 'true'
+          FERRUM_CP_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_DP_ADMIN_URL: http://127.0.0.1:9010
+          FERRUM_DP_PROXY_URL: http://127.0.0.1:8000
+          FERRUM_DEMO_BACKEND_HOST: host.docker.internal
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+        run: npm exec -- vitest run --project server server/routes/cp-dp-sync.gateway.test.ts
+
+      - name: Verify writable capability parity on the control plane
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && matrix.mode == 'cp-dp' }}
+        env:
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_DEMO_CONFIRM_TARGET: 'http://127.0.0.1:9000#ferrum-foundry-demo'
+          FERRUM_CAPABILITY_EXPECT: writable
+        run: node scripts/capability-parity-contract.mjs
+
+      - name: Verify read-only capability parity
+        # file, the data plane of the CP + DP pair, and mesh are read-only by
+        # mode; the UI must refuse exactly the writes the gateway refuses.
+        if: ${{ !cancelled() && steps.up.outcome == 'success' && (matrix.mode == 'file' || matrix.mode == 'cp-dp' || matrix.mode == 'mesh') }}
+        env:
+          FERRUM_ADMIN_URL: ${{ matrix.mode == 'cp-dp' && 'http://127.0.0.1:9010' || 'http://127.0.0.1:9000' }}
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_CAPABILITY_EXPECT: read-only
+        run: node scripts/capability-parity-contract.mjs
+
+      - name: Verify every page read through the BFF
+        if: ${{ !cancelled() && steps.up.outcome == 'success' }}
+        env:
+          FERRUM_PAGE_READS_GATEWAY_CONTRACT: 'true'
+          FERRUM_PAGE_READ_TARGETS: >-
+            ${{ matrix.mode == 'file' && 'file@http://127.0.0.1:9000'
+            || matrix.mode == 'cp-dp' && 'cp@http://127.0.0.1:9000,dp@http://127.0.0.1:9010'
+            || matrix.mode == 'mesh' && 'mesh@http://127.0.0.1:9000'
+            || 'database@http://127.0.0.1:9000' }}
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+        run: npm exec -- vitest run --project server server/routes/page-reads.gateway.test.ts
+
+      - name: Show gateway logs on failure
+        if: failure()
+        run: |
+          for container in $(docker ps --all --format '{{.Names}}'); do
+            echo "::group::${container}"
+            docker logs "${container}" 2>&1 | tail -200
+            echo "::endgroup::"
+          done
+          cat /tmp/ferrum-demo-backend.log
+
   image:
     # One production build for the Deployment Starter and the Critical
     # Journeys, which run the image an operator would pull, not a development
@@ -618,6 +741,110 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: critical-journey-evidence
+          path: |
+            e2e-report/
+            e2e-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Show stack logs on failure
+        if: failure()
+        run: |
+          docker compose \
+            -f deploy/starter/compose.yaml \
+            -f e2e/compose.e2e.yaml \
+            --profile demo logs --no-color --tail 200
+          cat /tmp/fault-proxy.log
+
+      - name: Tear the stack down
+        if: always()
+        run: |
+          docker compose \
+            -f deploy/starter/compose.yaml \
+            -f e2e/compose.e2e.yaml \
+            --profile demo down --volumes
+
+  critical-journeys-engines:
+    # The same critical journeys in the other engines Playwright ships, against
+    # the same starter stack. Chromium stays the Critical Journeys gate.
+    name: Critical Journeys (${{ matrix.browser }})
+    needs: image
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install the browser
+        run: npx playwright install --with-deps "${{ matrix.browser }}"
+
+      - name: Download the production image the journeys run against
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ferrum-foundry-image
+          path: ${{ runner.temp }}/image
+
+      - name: Load the production image
+        run: docker load --input "${RUNNER_TEMP}/image/ferrum-foundry-image.tar"
+
+      - name: Bring up the starter stack with the fault forwarder in the path
+        working-directory: deploy/starter
+        env:
+          FOUNDRY_IMAGE: ferrum-foundry:ci
+        run: ./bootstrap-demo.sh
+
+      - name: Start the stack
+        env:
+          FOUNDRY_IMAGE: ferrum-foundry:ci
+        run: |
+          docker compose \
+            -f deploy/starter/compose.yaml \
+            -f e2e/compose.e2e.yaml \
+            --profile demo up --detach --wait --wait-timeout 180
+
+      - name: Start the fault forwarder
+        env:
+          FAULT_UPSTREAM: http://127.0.0.1:9000
+          FAULT_TOKEN: ci-fault-token
+          PORT: "9500"
+        run: |
+          node e2e/fault-proxy.mjs >/tmp/fault-proxy.log 2>&1 &
+          for _attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              --header 'x-fault-token: ci-fault-token' \
+              http://127.0.0.1:9500/__fault >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/fault-proxy.log
+          exit 1
+
+      - name: Run the critical journeys
+        env:
+          FERRUM_E2E_BROWSER: ${{ matrix.browser }}
+          FOUNDRY_URL: http://127.0.0.1:8088
+          FERRUM_DATA_PLANE_URL: http://127.0.0.1:8000
+          FAULT_PROXY_URL: http://127.0.0.1:9500
+          FAULT_TOKEN: ci-fault-token
+        run: npm run e2e
+
+      - name: Upload browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: critical-journey-evidence-${{ matrix.browser }}
           path: |
             e2e-report/
             e2e-results/

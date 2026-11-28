@@ -170,9 +170,11 @@ describe("role x mode capability matrix", () => {
       }
       expect(capabilities.tlsRotation.allowed).toBe(true);
       expect(capabilities.operationalActions.allowed).toBe(true);
-      expect(capabilities.fleetOperations.allowed).toBe(true);
+      // A node agent holds no proxy state, so its dry-run answers 503.
+      expect(capabilities.fleetOperations.allowed).toBe(mode !== "node_agent");
       expect(capabilities.bffSettings.allowed).toBe(true);
       if (mode === "node_agent") {
+        expect(capabilities.fleetOperations.blockedBy).toBe("gateway-unavailable");
         expect(capabilities.configExport.allowed).toBe(false);
         expect(capabilities.configExport.blockedBy).toBe("gateway-read-only");
         expect(capabilities.configExport.explanation).toContain("node-agent mode");
@@ -309,6 +311,20 @@ describe("namespace-scoped sessions", () => {
       facts("operator", "database", true, "ok", false),
     );
     expect(unscoped.allowed).toBe(true);
+  });
+
+  it("withholds fleet operational actions from a gateway without proxy state, with Edge's reason", () => {
+    for (const mode of ["cp", "node_agent"] as const) {
+      const verdict = resolveCapability("fleetOperations", facts("operator", mode, true, "ok", false));
+      expect(verdict.allowed).toBe(false);
+      expect(verdict.blockedBy).toBe("gateway-unavailable");
+      expect(verdict.explanation).toContain("No proxy state available");
+    }
+    // A viewer is still told about the role first, as Edge checks it first.
+    expect(resolveCapability("fleetOperations", facts("viewer", "cp", true, "ok", false)).blockedBy)
+      .toBe("role");
+    expect(resolveCapability("fleetOperations", facts("operator", "dp", null, "ok", false)).allowed)
+      .toBe(true);
   });
 
   it("reports the role denial ahead of the namespace-scope denial", () => {

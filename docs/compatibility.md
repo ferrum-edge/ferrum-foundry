@@ -142,7 +142,9 @@ qualifies only if:
    `edge.release` and moves `edge.image` to that release must pass every job
    before any Foundry release is published: Quality Gate, Pinned Gateway
    Contract (including capability parity, writable and read-only), Deployment
-   Starter, Starter Production Profile, Critical Journeys, and Container Gate.
+   Starter, Starter Production Profile, Critical Journeys (Chromium, Firefox
+   and WebKit), Gateway Modes (file, CP + DP, mesh, PostgreSQL, MySQL and
+   MongoDB), and Container Gate.
    `QUALIFICATION_JOBS` in `scripts/hosted-qualification.mjs` is that list;
    release readiness refuses a run in which any of them did not succeed. The
    release evidence recorded in `qualification` is a successful hosted run of
@@ -587,11 +589,15 @@ envelope; they do not qualify other Edge images or gateway modes.
 | --- | --- | --- |
 | Gateway mode | `database` on SQLite, admin writes enabled, admin JWT with audience and `FERRUM_ADMIN_REQUIRE_NAMESPACE_CLAIM=true` | Pinned Gateway Contract, Deployment Starter, Critical Journeys, Container Gate |
 | Read-only admin API | `database` started with `FERRUM_ADMIN_READ_ONLY=true` | Pinned Gateway Contract (capability parity, read-only half) |
+| Database backends | `database` on PostgreSQL, on MySQL and on MongoDB (a one-member replica set), from the digest-pinned images in `scripts/gateway-modes/up.sh`, each from an empty database | Gateway Modes (postgres), (mysql), (mongodb): seed twice and verify the canonical backup, writable capability parity, every page read through the BFF |
+| Control plane | `cp` on SQLite, distributing to a data plane over plaintext gRPC | Gateway Modes (cp-dp): a proxy created through Foundry on the CP is served by the DP's admin API and routed by its data plane within a bounded wait, each side reports the other connected, writable capability parity on the CP, every page read through the BFF, the metrics placeholders |
+| Read-only gateway modes | `file` (a fresh configuration file), the `dp` of that CP + DP pair, and a `mesh` sidecar on a local mesh document (file protocol, a throwaway root and X.509-SVID) | Gateway Modes (file), (cp-dp), (mesh): read-only capability parity, every page read through the BFF, the metrics placeholders |
 | Roles | `viewer`, `operator`, `admin` | capability parity (every surface and the launch reads, per role); critical journeys through the identity proxy |
 | Authentication | `trusted-proxy` behind the starter's nginx identity proxy, with the shared group-to-role policy | Deployment Starter, Critical Journeys |
 | Production identity path | The starter's `production` profile as shipped: TLS nginx and oauth2-proxy (OIDC with PKCE S256, `--trusted-proxy-ip` set to the stack's subnet) against a mock OIDC provider, with no gateway | Starter Production Profile |
 | Deployment path | `deploy/starter` (Compose) with the production Foundry image | Deployment Starter, Critical Journeys |
 | Browser | Chromium bundled with `@playwright/test` 1.65.1, Desktop Chrome profile | Critical Journeys |
+| Other browser engines | Firefox (Desktop Firefox profile) and WebKit (Desktop Safari profile) bundled with the same `@playwright/test` | Critical Journeys (firefox), Critical Journeys (webkit): the same journeys as Chromium |
 | Container platforms | `linux/amd64`, `linux/arm64` | Container Gate (both builds start and serve a protected request) |
 | BFF Node.js | 22.22.2 and 24.15.0 minimums (the image ships 24) | Quality Gate matrix |
 
@@ -603,6 +609,37 @@ as v0.5.5 recorded it, apart from the Playwright version. The Browser row
 and `tested.browsers` name the `@playwright/test` version `package-lock.json`
 locks, which the Critical Journeys install (v0.5.5 ran 1.63.0), and
 `scripts/supported-pairing.test.mjs` fails when they differ.
+
+The database backend, control plane, read-only gateway mode and other browser
+engine rows are new for 1.0.0 and gate it (`QUALIFICATION_JOBS` in
+`scripts/hosted-qualification.mjs`); no earlier release was qualified on them.
+The machine-readable `tested` record gains them in the 1.0.0 release PR.
+"Every page read through the BFF" is `server/routes/page-reads.gateway.test.ts`.
+Each list, proxy-detail filtered read (`/plugins/config?proxy_id=…`, verifying
+the seeded proxy-bound plugin in database mode and an empty page for an absent
+proxy; and `/api-specs?offset=0&limit=2&proxy_id=…`, verifying the empty-state
+pagination contract on database-backed mode fixtures and the recorded `503`
+where the fixture lacks a database), and summary read a Foundry page
+sends, as an unrestricted and as a namespace-scoped administrator, must answer
+`200` with the fields the page consumes (the list envelope, the metrics gateway
+block, the cluster `connected_mesh_nodes`, `data_planes` and `mesh_nodes`
+fields on a control plane, the mesh snapshot shapes, the runtime overlay
+through the same rules as its decoder).
+Where the job's fixture leaves a feature off, the read must give exactly the
+recorded `404` or `503` instead, per mode: API specs, audit and gateway trust
+need a configuration database, the mesh observability reads are served by the
+mesh sidecar (slice drift by the control plane), and no fixture configures mesh
+federation or a waypoint. Losing a read the fixture enables fails. It also
+opens the first addressable row of each collection as the editors do, requires
+the fixture's proxy in the list where the job created one (and, in mesh mode,
+requires the runtime-generated sidecar proxy and `__mesh_spiffe_identity`
+plugin before checking their `400` detail refusals), checks that `/health` is
+ready in the expected mode, and that `adminMetricsReporting` hides exactly the
+`/admin/metrics` values the gateway serves as placeholders (Edge's
+no-proxy-state skeleton on a control plane). It reads; it does not render the
+pages, so the mesh views are qualified at the API boundary on a mesh sidecar
+with no control plane, not against a populated mesh, and the federation and
+waypoint views only for their not-served state.
 
 ### Tested scale
 
@@ -665,9 +702,11 @@ operation silently.
 Expected to work because nothing Foundry does depends on them, but not run in
 CI. Report problems; they do not block releases.
 
-- `database` mode on PostgreSQL or MySQL.
-- `cp` (control-plane) mode.
-- Other Chromium-based browsers, Firefox, and Safari.
+- Other Chromium-based browsers, and Firefox and Safari releases other than
+  the engines Playwright bundles (the journeys run Playwright's Firefox and
+  WebKit builds, not the branded browsers).
+- A mesh data plane that receives its slice from a control plane (native,
+  xDS or Kubernetes protocol) rather than a local mesh document.
 - Kubernetes or any other deployment that reproduces the documented
   trusted-proxy contract ([deployment.md](deployment.md)).
 - Static-token authentication (development only).
@@ -678,12 +717,18 @@ These are deliberate limits of what a Foundry release qualifies and supports, st
 every release from 1.0.0 onward; a change to them is recorded here and in the
 release notes.
 
-- `file`, `dp`, `mesh`, and `node_agent` gateway modes. The UI treats them as
-  read-only ([capabilities.md](capabilities.md)) and the mock admin gateway
-  reproduces that, but no real gateway in those modes runs in CI. The mesh,
-  waypoint, trust, chargeback and chargeback sink views are therefore
-  unqualified: they are built against the paired release's documented
-  response shapes and unit-tested against fixtures only.
+- `node_agent` gateway mode. It needs the Kubernetes API, eBPF capabilities
+  and the `-ebpf` image variant, none of which a CI runner provides. Foundry
+  treats it as a read-only gateway without proxy state
+  ([capabilities.md](capabilities.md)): every configuration write and the
+  managed TLS material are read-only, and configuration export is unavailable;
+  the fleet operations (the backend-capability refresh and the mesh egress
+  dry-run) are unavailable, with Edge's typed `503` as the reason; the
+  ungated actions (TLS rotation and validation, and BFF settings) stay
+  available to an unrestricted operator or administrator, as Edge serves them;
+  and the Metrics page and Dashboard show its zeroed runtime values as not
+  reported. The mock admin gateway (`MOCK_GATEWAY_MODE=node_agent`) reproduces
+  those answers; no real node agent runs in CI.
 - Support applies to published releases only: any published Foundry release
   against an Edge release other than the one its immutable record names
   ([History](#history)) is unsupported, as is any unpublished build. Hosted

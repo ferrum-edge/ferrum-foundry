@@ -34,6 +34,9 @@ const CHANGED_DURING_VERIFICATION_PATTERN = /changed during verification/;
 const WORKFLOW_JOB_NAME_PATTERN = /^ {4}name: (.+)$/gm;
 const NODE_MATRIX_PATTERN = /^ {10}- node: (\S+)$/gm;
 const PLATFORM_MATRIX_PATTERN = /^ {10}- platform: (\S+)$/gm;
+const MODE_MATRIX_PATTERN = /^ {8}mode: \[([^\]]+)\]$/m;
+const BROWSER_MATRIX_PATTERN = /^ {8}browser: \[([^\]]+)\]$/m;
+const LIST_SEPARATOR_PATTERN = /,\s*/;
 const STARTER_PRODUCTION_JOB_PATTERN = /successful current-attempt job: Starter Production Profile/;
 
 const base = readSupportedPairing();
@@ -210,6 +213,14 @@ describe("hosted qualification binding", () => {
       "Deployment Starter",
       "Starter Production Profile",
       "Critical Journeys",
+      "Critical Journeys (firefox)",
+      "Critical Journeys (webkit)",
+      "Gateway Modes (file)",
+      "Gateway Modes (cp-dp)",
+      "Gateway Modes (mesh)",
+      "Gateway Modes (postgres)",
+      "Gateway Modes (mysql)",
+      "Gateway Modes (mongodb)",
       "Container Gate (linux/amd64)",
       "Container Gate (linux/arm64)",
     ]);
@@ -231,6 +242,8 @@ describe("hosted qualification binding", () => {
     const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
     const nodes = [...workflow.matchAll(NODE_MATRIX_PATTERN)].map((match) => match[1]);
     const platforms = [...workflow.matchAll(PLATFORM_MATRIX_PATTERN)].map((match) => match[1]);
+    const modes = (MODE_MATRIX_PATTERN.exec(workflow)?.[1] ?? "").split(LIST_SEPARATOR_PATTERN);
+    const browsers = (BROWSER_MATRIX_PATTERN.exec(workflow)?.[1] ?? "").split(LIST_SEPARATOR_PATTERN);
     const names = new Set(
       [...workflow.matchAll(WORKFLOW_JOB_NAME_PATTERN)].flatMap(([, name]) => {
         if (name === "Quality Gate (Node ${{ matrix.node }})") {
@@ -238,6 +251,12 @@ describe("hosted qualification binding", () => {
         }
         if (name === "Container Gate (${{ matrix.platform }})") {
           return platforms.map((platform) => `Container Gate (${platform})`);
+        }
+        if (name === "Gateway Modes (${{ matrix.mode }})") {
+          return modes.map((mode) => `Gateway Modes (${mode})`);
+        }
+        if (name === "Critical Journeys (${{ matrix.browser }})") {
+          return browsers.map((browser) => `Critical Journeys (${browser})`);
         }
         return [name];
       }),
