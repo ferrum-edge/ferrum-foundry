@@ -615,12 +615,16 @@ engine rows are new for 1.0.0 and gate it (`QUALIFICATION_JOBS` in
 `scripts/hosted-qualification.mjs`); no earlier release was qualified on them.
 The machine-readable `tested` record gains them in the 1.0.0 release PR.
 "Every page read through the BFF" is `server/routes/page-reads.gateway.test.ts`.
-Each list, proxy-detail filtered read (`/plugins/config?proxy_id=…`,
-`/api-specs?proxy_id=…`), and summary read a Foundry page sends, as an
-unrestricted and as a namespace-scoped administrator, must answer `200` with
-the fields the page consumes (the list envelope, the metrics gateway block, the
-cluster `data_planes` and `mesh_nodes` arrays on a control plane, the mesh
-snapshot shapes, the runtime overlay through the same rules as its decoder).
+Each list, proxy-detail filtered read (`/plugins/config?proxy_id=…`, verifying
+matching proxy-bound rows where seeded and an empty page for an absent proxy;
+and `/api-specs?offset=0&limit=2&proxy_id=…`, verifying the empty-state
+pagination contract on these mode fixtures, while populated API-spec bindings
+are qualified by the Pinned Gateway Contract), and summary read a Foundry page
+sends, as an unrestricted and as a namespace-scoped administrator, must answer
+`200` with the fields the page consumes (the list envelope, the metrics gateway
+block, the cluster `connected_mesh_nodes`, `data_planes` and `mesh_nodes`
+fields on a control plane, the mesh snapshot shapes, the runtime overlay
+through the same rules as its decoder).
 Where the job's fixture leaves a feature off, the read must give exactly the
 recorded `404` or `503` instead, per mode: API specs, audit and gateway trust
 need a configuration database, the mesh observability reads are served by the

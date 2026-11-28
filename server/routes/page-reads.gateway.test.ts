@@ -386,6 +386,7 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
         if (target.mode === 'database' && proxies.length === 0) {
           failures.push('database /proxies is empty after the demo seed');
         }
+        const requiredMeshIds = new Map<string, string>();
         if (target.mode === 'mesh') {
           const proxyIds = proxies
             .map((proxy) => proxy.id)
@@ -393,19 +394,27 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
           const pluginIds = ((listed.get('/plugins/config') ?? []) as { id?: unknown }[])
             .map((plugin) => plugin.id)
             .filter((id): id is string => typeof id === 'string');
-          if (!proxyIds.some((id) => id.startsWith('__mesh-') && !isAddressableResourceId(id))) {
+          const sidecarProxyId = proxyIds.find((id) => id.startsWith('__mesh-') && !isAddressableResourceId(id));
+          if (!sidecarProxyId) {
             failures.push(`mesh /proxies does not list a generated sidecar proxy (got ${proxyIds.join(', ') || 'none'})`);
+          } else {
+            requiredMeshIds.set('proxies', sidecarProxyId);
           }
           if (!pluginIds.some((id) => id === '__mesh_spiffe_identity' && !isAddressableResourceId(id))) {
             failures.push(`mesh /plugins/config does not list __mesh_spiffe_identity (got ${pluginIds.join(', ') || 'none'})`);
+          } else {
+            requiredMeshIds.set('plugins/config', '__mesh_spiffe_identity');
           }
         }
 
         // Proxy-detail filtered reads (`GET /plugins/config?proxy_id=…` and,
-        // on database-backed modes, `GET /api-specs?proxy_id=…`). Use an
-        // existing proxy ID and an absent sentinel proxy ID so filtering is
-        // distinguished from returning the unfiltered collection.
-        const filterProxyId = fixtureProxy ?? proxies
+        // on database-backed modes, `GET /api-specs?offset=0&limit=2&proxy_id=…`).
+        const listedPlugins = (listed.get('/plugins/config') ?? []) as { id?: unknown; proxy_id?: unknown }[];
+        const proxyBoundPlugin = listedPlugins.find(
+          (row): row is { id: string; proxy_id: string } =>
+            typeof row.id === 'string' && typeof row.proxy_id === 'string' && row.proxy_id.length > 0,
+        );
+        const filterProxyId = proxyBoundPlugin?.proxy_id ?? fixtureProxy ?? proxies
           .map((proxy) => proxy.id)
           .find((id): id is string => typeof id === 'string' && isAddressableResourceId(id));
         const absentProxyId = 'modes-no-such-proxy-filter';
@@ -437,18 +446,29 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
             headers: scopedHeaders,
           });
           const filteredPluginsHitBody = filteredPluginsHit.statusCode === 200
-            ? JSON.parse(filteredPluginsHit.body)
+            ? JSON.parse(filteredPluginsHit.body) as { data?: { id?: unknown; proxy_id?: unknown }[] }
             : null;
-          const wrong = filteredPluginsHit.statusCode !== 200
+          let wrong = filteredPluginsHit.statusCode !== 200
             ? `${filteredPluginsHit.statusCode} ${errorDetail(filteredPluginsHit)}`
             : paginated(filteredPluginsHitBody);
+          if (!wrong && filteredPluginsHitBody?.data) {
+            if (!filteredPluginsHitBody.data.every((row) => row.proxy_id === filterProxyId)) {
+              wrong = `returned rows not bound to proxy_id=${filterProxyId}`;
+            } else if (
+              proxyBoundPlugin &&
+              proxyBoundPlugin.proxy_id === filterProxyId &&
+              !filteredPluginsHitBody.data.some((row) => row.id === proxyBoundPlugin.id)
+            ) {
+              wrong = `missing expected proxy-bound plugin ${proxyBoundPlugin.id}`;
+            }
+          }
           if (wrong) {
             failures.push(`${target.mode} filtered /plugins/config?proxy_id=${filterProxyId}: ${wrong}`);
           }
         }
         const filteredSpecsAbsent = await app.inject({
           method: 'GET',
-          url: `/api/proxy/api-specs${PAGE}&proxy_id=${encodeURIComponent(absentProxyId)}`,
+          url: `/api/proxy/api-specs?offset=0&limit=2&proxy_id=${encodeURIComponent(absentProxyId)}`,
           headers: scopedHeaders,
         });
         const expectedSpecsAbsent = DATABASE_BACKED[target.mode];
@@ -460,21 +480,25 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
           }
         } else {
           const filteredSpecsBody = filteredSpecsAbsent.statusCode === 200
-            ? JSON.parse(filteredSpecsAbsent.body) as { items?: unknown[] }
+            ? JSON.parse(filteredSpecsAbsent.body) as { items?: unknown[]; limit?: unknown; offset?: unknown; next_offset?: unknown; total?: unknown }
             : null;
           if (
             filteredSpecsAbsent.statusCode !== 200 ||
             itemPage(filteredSpecsBody) !== null ||
-            (filteredSpecsBody?.items?.length ?? -1) !== 0
+            (filteredSpecsBody?.items?.length ?? -1) !== 0 ||
+            filteredSpecsBody?.total !== 0 ||
+            filteredSpecsBody?.limit !== 2 ||
+            filteredSpecsBody?.offset !== 0 ||
+            filteredSpecsBody?.next_offset !== null
           ) {
             failures.push(
-              `${target.mode} filtered /api-specs?proxy_id=${absentProxyId}: ` +
-              `status ${filteredSpecsAbsent.statusCode}, count ${String(filteredSpecsBody?.items?.length)}`,
+              `${target.mode} filtered /api-specs?limit=2&proxy_id=${absentProxyId}: ` +
+              `status ${filteredSpecsAbsent.statusCode}, body ${JSON.stringify(filteredSpecsBody)}`,
             );
           }
         }
         rows.push(
-          `| ${target.mode} | Proxy detail | \`/api-specs?proxy_id=…\` | ${filteredSpecsAbsent.statusCode} | ${tableCell(expectedSpecsAbsent !== undefined ? `not served (expects ${expectedSpecsAbsent})` : 'filtered empty for absent proxy')} |`,
+          `| ${target.mode} | Proxy detail | \`/api-specs?limit=2&proxy_id=…\` | ${filteredSpecsAbsent.statusCode} | ${tableCell(expectedSpecsAbsent !== undefined ? `not served (expects ${expectedSpecsAbsent})` : 'empty limit=2 page for absent proxy')} |`,
         );
 
         // Detail reads, as the editors open a row: the first row Edge serves
@@ -485,7 +509,7 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
           const ids = ((listed.get(`/${collection}`) ?? []) as { id?: unknown }[])
             .map((row) => row.id)
             .filter((id): id is string => typeof id === 'string');
-          const generated = ids.find((id) => !isAddressableResourceId(id));
+          const generated = requiredMeshIds.get(collection) ?? ids.find((id) => !isAddressableResourceId(id));
           if (generated !== undefined) {
             const refused = await app.inject({
               method: 'GET', url: `/api/proxy/${collection}/${encodeURIComponent(generated)}`, headers: scopedHeaders,

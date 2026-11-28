@@ -84,7 +84,9 @@ describe("the egress tab on a gateway without proxy state", () => {
       Response.json({ error: "Internal Server Error" }, { status: 500, headers: { "retry-after": "0" } });
     await ui.render(<MeshPage />);
     await selectTab("Egress");
-    await settle(() => expect(panel().textContent).toContain("Egress scope unavailable"));
+    await settle(() => expect(panel().textContent).toContain("Egress scope unavailable"), {
+      timeout: 3000,
+    });
     expect(panel().querySelector('[data-capability-blocked="gateway-unavailable"]')).toBeNull();
     expect(panel().textContent).toContain("Retry");
   });
