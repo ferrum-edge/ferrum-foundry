@@ -190,10 +190,10 @@ YAML
       --env POSTGRES_USER=ferrum --env POSTGRES_PASSWORD=ferrum-ci-only --env POSTGRES_DB=ferrum \
       postgres@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
     for _attempt in $(seq 1 60); do
-      if docker exec ferrum-modes-db pg_isready -U ferrum -d ferrum >/dev/null 2>&1; then break; fi
+      if docker exec ferrum-modes-db pg_isready -h 127.0.0.1 -p 5432 -U ferrum -d ferrum >/dev/null 2>&1; then break; fi
       sleep 2
     done
-    docker exec ferrum-modes-db pg_isready -U ferrum -d ferrum
+    docker exec ferrum-modes-db pg_isready -h 127.0.0.1 -p 5432 -U ferrum -d ferrum
     db_type=postgres
     db_url='postgres://ferrum:ferrum-ci-only@ferrum-modes-db:5432/ferrum'
     ;;&
@@ -205,10 +205,10 @@ YAML
         --env MYSQL_DATABASE=ferrum --env MYSQL_ROOT_PASSWORD=ferrum-ci-root-only \
         mysql@sha256:8c233bad33d520a7aae1c1e619c3a9775f4a1ba2d463d692fada04ec7f40be00
       for _attempt in $(seq 1 90); do
-        if docker exec ferrum-modes-db mysql -uferrum -pferrum-ci-only -e 'SELECT 1' ferrum >/dev/null 2>&1; then break; fi
+        if docker exec ferrum-modes-db mysql --protocol=TCP -h 127.0.0.1 -P 3306 -uferrum -pferrum-ci-only -e 'SELECT 1' ferrum >/dev/null 2>&1; then break; fi
         sleep 2
       done
-      docker exec ferrum-modes-db mysql -uferrum -pferrum-ci-only -e 'SELECT 1' ferrum >/dev/null
+      docker exec ferrum-modes-db mysql --protocol=TCP -h 127.0.0.1 -P 3306 -uferrum -pferrum-ci-only -e 'SELECT 1' ferrum >/dev/null
       db_type=mysql
       db_url='mysql://ferrum:ferrum-ci-only@ferrum-modes-db:3306/ferrum'
     fi

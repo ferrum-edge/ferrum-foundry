@@ -26,7 +26,7 @@ const ENGINES = {
 } as const;
 type Engine = keyof typeof ENGINES;
 const requested = process.env.FERRUM_E2E_BROWSER ?? "chromium";
-if (!(requested in ENGINES)) {
+if (!Object.hasOwn(ENGINES, requested)) {
   throw new Error(`FERRUM_E2E_BROWSER must be one of ${Object.keys(ENGINES).join(", ")}`);
 }
 const E2E_BROWSER = requested as Engine;

@@ -10,6 +10,9 @@
  */
 const ADDRESSABLE_RESOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/** Edge caps resource IDs at 254 characters (`config::types::validate_id`). */
+const MAX_ADDRESSABLE_RESOURCE_ID_LENGTH = 254;
+
 /**
  * Whether Edge serves this resource by ID. A mesh sidecar lists rows its
  * runtime synthesizes, such as `__mesh-inbound-…` proxies and the
@@ -18,7 +21,7 @@ const ADDRESSABLE_RESOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
  * lists but offers no detail page or editor for them.
  */
 export function isAddressableResourceId(id: string): boolean {
-  return ADDRESSABLE_RESOURCE_ID_PATTERN.test(id);
+  return id.length <= MAX_ADDRESSABLE_RESOURCE_ID_LENGTH && ADDRESSABLE_RESOURCE_ID_PATTERN.test(id);
 }
 
 export const GENERATED_RESOURCE_EXPLANATION =

@@ -419,6 +419,18 @@ function ClustersTab() {
 
 /* ---------- Egress scope ---------- */
 
+function isNoProxyStateError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const status = (error as { response?: { status?: number } }).response?.status;
+  if (status !== 503) return false;
+  const data = (error as { data?: unknown }).data;
+  return (
+    Boolean(data) &&
+    typeof data === "object" &&
+    (data as { error?: unknown }).error === "No proxy state available"
+  );
+}
+
 function EgressTab() {
   const { toast } = useToast();
   const query = useEgressScope();
@@ -433,9 +445,10 @@ function EgressTab() {
   if (isLoading) return <SkeletonCard />;
   if (!data) {
     // A gateway without proxy state (a control plane, a node agent) answers
-    // the egress read with the same 503 as the dry-run. Once /health has
-    // established that mode, say why instead of a bare unavailable state.
-    if (canTest.blockedBy === "gateway-unavailable") {
+    // the egress read with the same typed 503 (`No proxy state available`) as
+    // the dry-run. Only convert that specific 503 into the mode notice so 403
+    // authorization denials and network/BFF errors keep their own notices.
+    if (canTest.blockedBy === "gateway-unavailable" && isNoProxyStateError(query.error)) {
       return <CapabilityNotice verdict={canTest} />;
     }
     return <MeshReadFailure query={query} what="Egress scope" />;

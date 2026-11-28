@@ -152,7 +152,14 @@ const PAGE_READS: PageRead[] = [
     path: '/cluster',
     check: (body) => {
       if (!isObject(body) || typeof body.mode !== 'string') return 'no mode';
-      if (body.mode === 'cp') return fields({ connected_data_planes: 'number', data_planes: 'array' })(body);
+      if (body.mode === 'cp') {
+        return fields({
+          connected_data_planes: 'number',
+          data_planes: 'array',
+          connected_mesh_nodes: 'number',
+          mesh_nodes: 'array',
+        })(body);
+      }
       if (body.mode === 'dp') return fields({ control_plane: 'object|null' })(body);
       return fields({ message: 'string' })(body);
     },
@@ -379,6 +386,96 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
         if (target.mode === 'database' && proxies.length === 0) {
           failures.push('database /proxies is empty after the demo seed');
         }
+        if (target.mode === 'mesh') {
+          const proxyIds = proxies
+            .map((proxy) => proxy.id)
+            .filter((id): id is string => typeof id === 'string');
+          const pluginIds = ((listed.get('/plugins/config') ?? []) as { id?: unknown }[])
+            .map((plugin) => plugin.id)
+            .filter((id): id is string => typeof id === 'string');
+          if (!proxyIds.some((id) => id.startsWith('__mesh-') && !isAddressableResourceId(id))) {
+            failures.push(`mesh /proxies does not list a generated sidecar proxy (got ${proxyIds.join(', ') || 'none'})`);
+          }
+          if (!pluginIds.some((id) => id === '__mesh_spiffe_identity' && !isAddressableResourceId(id))) {
+            failures.push(`mesh /plugins/config does not list __mesh_spiffe_identity (got ${pluginIds.join(', ') || 'none'})`);
+          }
+        }
+
+        // Proxy-detail filtered reads (`GET /plugins/config?proxy_id=…` and,
+        // on database-backed modes, `GET /api-specs?proxy_id=…`). Use an
+        // existing proxy ID and an absent sentinel proxy ID so filtering is
+        // distinguished from returning the unfiltered collection.
+        const filterProxyId = fixtureProxy ?? proxies
+          .map((proxy) => proxy.id)
+          .find((id): id is string => typeof id === 'string' && isAddressableResourceId(id));
+        const absentProxyId = 'modes-no-such-proxy-filter';
+        const filteredPluginsAbsent = await app.inject({
+          method: 'GET',
+          url: `/api/proxy/plugins/config${PAGE}&proxy_id=${encodeURIComponent(absentProxyId)}`,
+          headers: scopedHeaders,
+        });
+        const filteredPluginsAbsentBody = filteredPluginsAbsent.statusCode === 200
+          ? JSON.parse(filteredPluginsAbsent.body) as { data?: unknown[] }
+          : null;
+        if (
+          filteredPluginsAbsent.statusCode !== 200 ||
+          paginated(filteredPluginsAbsentBody) !== null ||
+          (filteredPluginsAbsentBody?.data?.length ?? -1) !== 0
+        ) {
+          failures.push(
+            `${target.mode} filtered /plugins/config?proxy_id=${absentProxyId}: ` +
+            `status ${filteredPluginsAbsent.statusCode}, count ${String(filteredPluginsAbsentBody?.data?.length)}`,
+          );
+        }
+        rows.push(
+          `| ${target.mode} | Proxy detail | \`/plugins/config?proxy_id=…\` | ${filteredPluginsAbsent.statusCode} | ${tableCell(`absent proxy returned ${String(filteredPluginsAbsentBody?.data?.length ?? 'n/a')} rows`)} |`,
+        );
+        if (filterProxyId) {
+          const filteredPluginsHit = await app.inject({
+            method: 'GET',
+            url: `/api/proxy/plugins/config${PAGE}&proxy_id=${encodeURIComponent(filterProxyId)}`,
+            headers: scopedHeaders,
+          });
+          const filteredPluginsHitBody = filteredPluginsHit.statusCode === 200
+            ? JSON.parse(filteredPluginsHit.body)
+            : null;
+          const wrong = filteredPluginsHit.statusCode !== 200
+            ? `${filteredPluginsHit.statusCode} ${errorDetail(filteredPluginsHit)}`
+            : paginated(filteredPluginsHitBody);
+          if (wrong) {
+            failures.push(`${target.mode} filtered /plugins/config?proxy_id=${filterProxyId}: ${wrong}`);
+          }
+        }
+        const filteredSpecsAbsent = await app.inject({
+          method: 'GET',
+          url: `/api/proxy/api-specs${PAGE}&proxy_id=${encodeURIComponent(absentProxyId)}`,
+          headers: scopedHeaders,
+        });
+        const expectedSpecsAbsent = DATABASE_BACKED[target.mode];
+        if (expectedSpecsAbsent !== undefined) {
+          if (filteredSpecsAbsent.statusCode !== expectedSpecsAbsent) {
+            failures.push(
+              `${target.mode} filtered /api-specs?proxy_id=${absentProxyId}: ${filteredSpecsAbsent.statusCode}, expected ${expectedSpecsAbsent}`,
+            );
+          }
+        } else {
+          const filteredSpecsBody = filteredSpecsAbsent.statusCode === 200
+            ? JSON.parse(filteredSpecsAbsent.body) as { items?: unknown[] }
+            : null;
+          if (
+            filteredSpecsAbsent.statusCode !== 200 ||
+            itemPage(filteredSpecsBody) !== null ||
+            (filteredSpecsBody?.items?.length ?? -1) !== 0
+          ) {
+            failures.push(
+              `${target.mode} filtered /api-specs?proxy_id=${absentProxyId}: ` +
+              `status ${filteredSpecsAbsent.statusCode}, count ${String(filteredSpecsBody?.items?.length)}`,
+            );
+          }
+        }
+        rows.push(
+          `| ${target.mode} | Proxy detail | \`/api-specs?proxy_id=…\` | ${filteredSpecsAbsent.statusCode} | ${tableCell(expectedSpecsAbsent !== undefined ? `not served (expects ${expectedSpecsAbsent})` : 'filtered empty for absent proxy')} |`,
+        );
 
         // Detail reads, as the editors open a row: the first row Edge serves
         // by ID. A row outside Edge's ID grammar (a mesh sidecar's

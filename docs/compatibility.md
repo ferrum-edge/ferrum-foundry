@@ -615,19 +615,23 @@ engine rows are new for 1.0.0 and gate it (`QUALIFICATION_JOBS` in
 `scripts/hosted-qualification.mjs`); no earlier release was qualified on them.
 The machine-readable `tested` record gains them in the 1.0.0 release PR.
 "Every page read through the BFF" is `server/routes/page-reads.gateway.test.ts`.
-Each list and summary read a Foundry page sends, as an unrestricted and as a
-namespace-scoped administrator, must answer `200` with the fields the page
-consumes (the list envelope, the metrics gateway block, the mesh snapshot
-shapes, the runtime overlay through the same rules as its decoder). Where the
-job's fixture leaves a feature off, the read must give exactly the recorded
-`404` or `503` instead, per mode: API specs, audit and gateway trust need a
-configuration database, the mesh observability reads are served by the mesh
-sidecar (slice drift by the control plane), and no fixture configures mesh
+Each list, proxy-detail filtered read (`/plugins/config?proxy_id=…`,
+`/api-specs?proxy_id=…`), and summary read a Foundry page sends, as an
+unrestricted and as a namespace-scoped administrator, must answer `200` with
+the fields the page consumes (the list envelope, the metrics gateway block, the
+cluster `data_planes` and `mesh_nodes` arrays on a control plane, the mesh
+snapshot shapes, the runtime overlay through the same rules as its decoder).
+Where the job's fixture leaves a feature off, the read must give exactly the
+recorded `404` or `503` instead, per mode: API specs, audit and gateway trust
+need a configuration database, the mesh observability reads are served by the
+mesh sidecar (slice drift by the control plane), and no fixture configures mesh
 federation or a waypoint. Losing a read the fixture enables fails. It also
-opens the first row of each collection as the editors do, requires the
-fixture's proxy in the list where the job created one, checks that `/health`
-is ready in the expected mode, and that `adminMetricsReporting` hides exactly
-the `/admin/metrics` values the gateway serves as placeholders (Edge's
+opens the first addressable row of each collection as the editors do, requires
+the fixture's proxy in the list where the job created one (and, in mesh mode,
+requires the runtime-generated sidecar proxy and `__mesh_spiffe_identity`
+plugin before checking their `400` detail refusals), checks that `/health` is
+ready in the expected mode, and that `adminMetricsReporting` hides exactly the
+`/admin/metrics` values the gateway serves as placeholders (Edge's
 no-proxy-state skeleton on a control plane). It reads; it does not render the
 pages, so the mesh views are qualified at the API boundary on a mesh sidecar
 with no control plane, not against a populated mesh, and the federation and

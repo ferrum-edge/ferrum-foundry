@@ -83,18 +83,16 @@ services:
   # The demo BFF: the production definition above, on the demo profile, with
   # plain cookies. The demo is served over plain HTTP on loopback, and
   # browsers that do not treat plain-HTTP loopback as secure (Safari, WebKit)
-  # drop Secure cookies, so this one service turns them off. It answers to
-  # `foundry` on the stack network, so the demo proxy's configuration is the
-  # production one's. The production profile cannot select it.
+  # drop Secure cookies, so this one service turns them off. It keeps its own
+  # DNS name (`foundry-demo`) rather than aliasing `foundry`, so activating both
+  # profiles together can never route production nginx to the plain-cookie BFF
+  # or demo nginx to the Secure-cookie BFF.
   foundry-demo:
     <<: *foundry
     profiles: [demo]
     environment:
       <<: *foundry-environment
       FERRUM_SECURE_COOKIES: "false"
-    networks:
-      default:
-        aliases: [foundry]
 
   oauth2-proxy:
     # Third-party images name their tag and digest together: the digest is what

@@ -59,7 +59,9 @@ const DEMO_PROFILE_PATTERN = /^ {4}profiles: \[demo\]$/m;
 const SECURE_COOKIES_ON_PATTERN = /^ {6}FERRUM_SECURE_COOKIES: "true"$/m;
 const SECURE_COOKIES_OFF_PATTERN = /^ {6}FERRUM_SECURE_COOKIES: "false"$/m;
 const SECURE_COOKIES_ANY_PATTERN = /FERRUM_SECURE_COOKIES/g;
-const FOUNDRY_ALIAS_PATTERN = /^ {8}aliases: \[foundry\]$/m;
+const FOUNDRY_ALIAS_PATTERN = /\baliases:\s*\[.*\bfoundry\b/;
+const PROD_PROXY_PASS_PATTERN = /^\s*proxy_pass http:\/\/foundry:8080;$/m;
+const DEMO_PROXY_PASS_PATTERN = /^\s*proxy_pass http:\/\/foundry-demo:8080;$/m;
 const DEMO_PROXY_DEPENDS_PATTERN = /^ {4}depends_on:\n {6}- foundry-demo$/m;
 const INDENTED_PORTS_PATTERN = /^\s{4}ports:/m;
 const FOUNDRY_IMAGE_PATTERN = /^FOUNDRY_IMAGE=/m;
@@ -743,11 +745,19 @@ test("only the demo service runs Foundry without Secure cookies, and no setting 
   assert.match(production, SECURE_COOKIES_ON_PATTERN);
   assert.match(demo, DEMO_PROFILE_PATTERN);
   assert.match(demo, SECURE_COOKIES_OFF_PATTERN);
-  assert.match(demo, FOUNDRY_ALIAS_PATTERN, "the demo proxy reaches the demo BFF as foundry");
+  assert.doesNotMatch(
+    demo,
+    FOUNDRY_ALIAS_PATTERN,
+    "the demo BFF must not alias foundry on the shared network",
+  );
   // Exactly the two literals: no interpolation an operator could override.
   assert.equal([...compose.matchAll(SECURE_COOKIES_ANY_PATTERN)].length, 2);
   const demoProxy = compose.slice(compose.indexOf("  demo-proxy:"), compose.indexOf("  demo-gateway:"));
   assert.match(demoProxy, DEMO_PROXY_DEPENDS_PATTERN);
+  const prodNginx = await readFile(new URL("nginx/foundry.conf", STARTER), "utf8");
+  const demoNginx = await readFile(new URL("nginx/foundry.demo.conf", STARTER), "utf8");
+  assert.match(prodNginx, PROD_PROXY_PASS_PATTERN);
+  assert.match(demoNginx, DEMO_PROXY_PASS_PATTERN);
 
   const example = parseEnvFile(await readFile(new URL(".env.example", STARTER), "utf8"));
   assert.equal(example.FERRUM_SECURE_COOKIES, undefined, ".env.example must not offer the setting");

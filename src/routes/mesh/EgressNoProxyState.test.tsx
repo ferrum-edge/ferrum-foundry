@@ -18,19 +18,27 @@ vi.mock("@/stores/capabilities", () => ({
 let ui: ReturnType<typeof createHarness>;
 const popup = vi.fn();
 
+let cpEgressResponse: () => Response = () =>
+  Response.json(
+    { error: "No proxy state available" },
+    { status: 503, headers: { "retry-after": "0" } },
+  );
+
 beforeEach(() => {
   ui = createHarness();
   popup.mockClear();
   setApiErrorHandler(popup);
+  cpEgressResponse = () =>
+    Response.json(
+      { error: "No proxy state available" },
+      { status: 503, headers: { "retry-after": "0" } },
+    );
   stubFetch(async (request) => {
     const path = new URL(request.url).pathname.replace("/api/proxy/", "");
     // Edge answers the egress read on a gateway without proxy state with the
     // same typed 503 as the dry-run (#759 review F7).
     if (path === "mesh/egress-scope" && facts.mode === "cp") {
-      return Response.json(
-        { error: "No proxy state available" },
-        { status: 503, headers: { "retry-after": "0" } },
-      );
+      return cpEgressResponse();
     }
     if (path in meshResponses) return Response.json(meshResponses[path]);
     return Response.json({ error: "Not Found" }, { status: 404, headers: { "retry-after": "0" } });
@@ -58,5 +66,26 @@ describe("the egress tab on a gateway without proxy state", () => {
     await selectTab("Egress");
     await settle(() => expect(panel().textContent).toContain("Known Destinations"));
     expect(panel().querySelector('[data-capability-blocked="gateway-unavailable"]')).toBeNull();
+  });
+
+  it("preserves a 403 authorization denial on a control plane instead of masking it as mode-unavailable", async () => {
+    facts = { role: "admin", namespaceScoped: false, mode: "cp", adminWritesEnabled: true, status: "ok" };
+    cpEgressResponse = () =>
+      Response.json({ error: "Forbidden" }, { status: 403, headers: { "retry-after": "0" } });
+    await ui.render(<MeshPage />);
+    await selectTab("Egress");
+    await settle(() => expect(panel().querySelector("[data-read-denied]")).not.toBeNull());
+    expect(panel().querySelector('[data-capability-blocked="gateway-unavailable"]')).toBeNull();
+  });
+
+  it("preserves a 500 server error with retry on a control plane", async () => {
+    facts = { role: "admin", namespaceScoped: false, mode: "cp", adminWritesEnabled: true, status: "ok" };
+    cpEgressResponse = () =>
+      Response.json({ error: "Internal Server Error" }, { status: 500, headers: { "retry-after": "0" } });
+    await ui.render(<MeshPage />);
+    await selectTab("Egress");
+    await settle(() => expect(panel().textContent).toContain("Egress scope unavailable"));
+    expect(panel().querySelector('[data-capability-blocked="gateway-unavailable"]')).toBeNull();
+    expect(panel().textContent).toContain("Retry");
   });
 });
