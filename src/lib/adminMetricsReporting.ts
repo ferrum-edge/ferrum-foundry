@@ -44,6 +44,23 @@ export interface AdminMetricsReporting {
   unavailableDetail?: string;
 }
 
+/**
+ * Where the mode facts below were read. `npm run check:edge-source-parity`
+ * (`scripts/edge-source-parity.mjs`) re-reads `path` at `edge.source_commit`
+ * in the Pinned Gateway Contract job, and at Edge `main` in the Edge Main
+ * Drift workflow: `ADMIN_METRICS_MODES` must be the modes `MODE_LABELS` names,
+ * and the modes `contract_fixtures` does not give a proxy-serving payload
+ * (Edge's own record of which modes answer with `empty_proxy_metrics`) must
+ * be `NO_PROXY_STATE_MODES`. The Gateway Modes job checks the same decision
+ * against a real control plane's `/admin/metrics`.
+ */
+export const ADMIN_METRICS_SOURCE = {
+  repository: "ferrum-edge/ferrum-edge",
+  path: "src/admin/metrics.rs",
+  release: "v0.9.21",
+  commit: "f9915358c8032214f4034a17c28cdf72d14006c3",
+} as const;
+
 // Maps, not object literals: a mode string such as "constructor" must not
 // resolve to an inherited Object.prototype member.
 const MODE_LABELS: ReadonlyMap<string, string> = new Map([
@@ -60,6 +77,12 @@ const NO_PROXY_STATE_ROLES: ReadonlyMap<string, string> = new Map([
   ["cp", "a control plane"],
   ["node_agent", "a node agent"],
 ]);
+
+/** Every `gateway.mode` Foundry names. */
+export const METRICS_MODES: readonly string[] = [...MODE_LABELS.keys()];
+
+/** The modes whose `/admin/metrics` is Edge's no-proxy-state skeleton. */
+export const NO_PROXY_STATE_MODES: readonly string[] = [...NO_PROXY_STATE_ROLES.keys()];
 
 export function adminMetricsReporting(mode: string): AdminMetricsReporting {
   const modeLabel = MODE_LABELS.get(mode) ?? mode;

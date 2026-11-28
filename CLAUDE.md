@@ -439,6 +439,13 @@ See `docs/concurrent-edits.md`.
   secondary views load when their tab opens. A *summary* that would need a
   whole-collection scan stops at `SUMMARY_SCAN_BUDGET` and reports unavailable
   rather than a smaller number.
+- Effective policy (`src/lib/effectivePolicy.ts`) mirrors Edge's scope merge,
+  chain order (`src/lib/pluginChainOrder.ts`), `auth_mode` and
+  `access_control`. `npm run check:edge-source-parity` (Pinned Gateway
+  Contract and Edge Main Drift) re-reads the Edge sources it, the namespace
+  route ceiling (`EDGE_NAMESPACE_SCOPED_KINDS`) and the metrics placeholder
+  modes are transcribed from, and `src/api/effectivePolicy.gateway.test.ts`
+  compares its decisions with the data plane.
 - A conclusion that is wrong if partial (effective policy, membership) is
   complete or unknown, never partial. Traversals take the Query's `AbortSignal`
   so a namespace switch abandons them; membership plans deliberately pass none.

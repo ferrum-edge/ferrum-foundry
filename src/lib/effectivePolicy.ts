@@ -5,7 +5,8 @@ import type {
   Proxy,
 } from "@/api/types";
 import { PLUGIN_METADATA } from "@/lib/pluginConfigDefaults";
-import { pluginAppliesToProxy } from "@/lib/pluginProtocols";
+import { compareUtf8, comparePluginChainOrder } from "@/lib/pluginChainOrder";
+import { isStreamProxy, pluginAppliesToProxy } from "@/lib/pluginProtocols";
 
 const LOCAL_AUTH_CREDENTIALS: Readonly<Record<string, BuiltInCredentialType>> = {
   key_auth: "keyauth",
@@ -66,7 +67,7 @@ const UNIDENTIFIED_ACL_REASON =
  * How the gateway treats a proxy on which no recognized plugin establishes an
  * identity.
  *
- * Ferrum Edge v0.9.7 `src/plugins/access_control.rs` (`authorize_identity`)
+ * Ferrum Edge v0.9.21 `src/plugins/access_control.rs` (`authorize_identity`)
  * rejects a request with 401 "No consumer identified" when neither
  * `identified_consumer` nor `authenticated_identity` is set, before any allow
  * or deny list is consulted, and `allow_authenticated_identity` only admits an
@@ -144,10 +145,6 @@ export interface ProxyPolicyAnalysis {
   latestConfigUpdate?: string;
 }
 
-function priority(plugin: PluginConfig): number {
-  return plugin.priority_override ?? Number.MAX_SAFE_INTEGER;
-}
-
 /**
  * Enabled plugin configurations arranged so a single proxy's attached set
  * can be assembled without rescanning the whole collection.
@@ -163,7 +160,7 @@ function priority(plugin: PluginConfig): number {
  * rebuilt when the data changes.
  */
 export interface PluginAttachmentIndex {
-  /** Enabled global configurations, in collection order. */
+  /** Enabled global configurations, in ascending configuration id. */
   readonly globals: readonly PluginConfig[];
   /** Enabled proxy- and proxy-group-scoped configurations, by configuration id. */
   readonly byId: ReadonlyMap<string, PluginConfig>;
@@ -181,6 +178,9 @@ export function buildPluginAttachmentIndex(
     if (plugin.scope === "global") globals.push(plugin);
     else byId.set(plugin.id, plugin);
   }
+  // Edge assembles a chain from configurations in ascending id
+  // (`plugin_configs_in_canonical_order`), so that is the tie order.
+  globals.sort((left, right) => compareUtf8(left.id, right.id));
 
   return { globals, byId };
 }
@@ -241,23 +241,36 @@ function shadowsGlobal(plugin: PluginConfig, proxy: Proxy): boolean {
  * Every enabled plugin config attached to this proxy by global, direct, or
  * proxy-group scope, before the gateway's protocol filter is applied.
  *
- * Mirrors the gateway's scope merge (Ferrum Edge v0.9.7 `plugin_cache.rs`,
- * `remove_shadowed_global_plugin` and `is_istio_route_transform_consumer`):
+ * Mirrors the gateway's scope merge (Ferrum Edge v0.9.21 `src/plugin_cache.rs`,
+ * `remove_shadowed_globals` and `is_istio_route_transform_consumer`):
  * an enabled, attached proxy- or eligible proxy-group-scoped configuration
  * replaces every global configuration with the same plugin name, except for
  * the request/response size limiters and the Istio route-transform consumer,
  * which are additive. A proxy-group configuration with any `proxy_id` is not
  * eligible; a disabled or unattached scoped configuration shadows nothing,
  * because the gateway never merges it.
+ *
+ * The result is in the order the gateway runs the chain: globals, then
+ * proxy-scoped, then proxy-group configurations, each in ascending id, sorted
+ * stably by effective priority (`priority_override`, else the plugin's
+ * default) and then plugin name (`plugin_chain_order`).
+ *
+ * Edge also requires a scoped instance to share a global's built-in standing
+ * before it shadows it, so a custom plugin reporting a built-in's name never
+ * removes that built-in's global policy. A custom plugin cannot take a
+ * built-in's name through the admin API (Edge resolves built-in names first),
+ * so every configuration Foundry reads with the same name has the same
+ * standing.
  */
 function attachedPluginsForProxy(
   proxy: Proxy,
   index: PluginAttachmentIndex,
 ): EffectivePlugin[] {
-  const associated = new Set(
-    (proxy.plugins ?? []).map((association) => association.plugin_config_id),
-  );
-  const scoped: PluginConfig[] = [];
+  const associated = [
+    ...new Set((proxy.plugins ?? []).map((association) => association.plugin_config_id)),
+  ].sort(compareUtf8);
+  const proxyScoped: PluginConfig[] = [];
+  const groupScoped: PluginConfig[] = [];
   const shadowed = new Set<string>();
 
   for (const id of associated) {
@@ -269,7 +282,7 @@ function attachedPluginsForProxy(
     // Ferrum Edge's full composition rebuild admits proxy-group configs only
     // when `proxy_id` is absent (PluginScope::ProxyGroup && proxy_id.is_none()).
     if (plugin.scope === "proxy_group" && plugin.proxy_id != null) continue;
-    scoped.push(plugin);
+    (plugin.scope === "proxy" ? proxyScoped : groupScoped).push(plugin);
     if (shadowsGlobal(plugin, proxy)) shadowed.add(plugin.plugin_name);
   }
 
@@ -277,14 +290,12 @@ function attachedPluginsForProxy(
     ? index.globals
     : index.globals.filter((plugin) => !shadowed.has(plugin.plugin_name));
 
-  return [...globals, ...scoped]
+  return [...globals, ...proxyScoped, ...groupScoped]
     .map((plugin) => ({
       ...plugin,
       effectiveSource: plugin.scope,
     }))
-    .sort((left, right) =>
-      priority(left) - priority(right) || left.id.localeCompare(right.id),
-    );
+    .sort(comparePluginChainOrder);
 }
 
 /**
@@ -326,6 +337,20 @@ function stringList(config: Record<string, unknown>, key: string): string[] {
     : [];
 }
 
+function hasEntries(config: Record<string, unknown>, key: string): boolean {
+  const value = config[key];
+  return Array.isArray(value) && value.length > 0;
+}
+
+/**
+ * The access_control decision for a mapped Consumer, as Ferrum Edge v0.9.21
+ * `authorize_identity` makes it: `disallowed_consumers`, then
+ * `disallowed_groups`, refuse first; then, when the plugin has any allow-list
+ * (`allowed_consumers`, `allowed_groups` or `allowed_external_identities`),
+ * only a username or group on the Consumer allow-lists is admitted. An ACL
+ * whose only allow-list is `allowed_external_identities` therefore refuses
+ * every mapped Consumer: an allow-list means "only these principals".
+ */
 function aclDecision(
   consumer: Consumer,
   plugins: EffectivePlugin[],
@@ -340,6 +365,7 @@ function aclDecision(
     const deniedGroups = stringList(config, "disallowed_groups");
     const allowedConsumers = stringList(config, "allowed_consumers");
     const allowedGroups = stringList(config, "allowed_groups");
+    const allowsExternal = hasEntries(config, "allowed_external_identities");
 
     if (deniedConsumers.includes(consumer.username)) {
       return {
@@ -357,14 +383,18 @@ function aclDecision(
       };
     }
 
-    if (allowedConsumers.length > 0 || allowedGroups.length > 0) {
+    if (allowedConsumers.length > 0 || allowedGroups.length > 0 || allowsExternal) {
       const usernameAllowed = allowedConsumers.includes(consumer.username);
       const groupAllowed = allowedGroups.some((group) => groups.has(group));
       if (!usernameAllowed && !groupAllowed) {
         return {
           denied: true,
           conditional: conditionalPlugins.length > 0,
-          reasons: [`${plugin.id} has an allow-list that does not match this consumer`],
+          reasons: [
+            allowedConsumers.length === 0 && allowedGroups.length === 0
+              ? `${plugin.id} allows only external identities (allowed_external_identities), so it refuses every Consumer`
+              : `${plugin.id} has an allow-list that does not match this consumer`,
+          ],
         };
       }
       reasons.push(`${plugin.id} allow-list matches`);
@@ -382,12 +412,63 @@ function hasCredential(consumer: Consumer, type: BuiltInCredentialType): boolean
   return Array.isArray(entries) && entries.length > 0;
 }
 
+/**
+ * Why a proxy's outcome depends on the order its authentication plugins run
+ * in, or `undefined` when it does not.
+ *
+ * Ferrum Edge v0.9.21 `run_authentication_phase_with_envelope`
+ * (`src/proxy/mod.rs`) runs the applicable authentication plugins in chain
+ * order. A plugin that finds no credential of its own continues to the next.
+ * In `multi` mode the first plugin that authenticates admits the request and
+ * an earlier rejection is discarded, so order cannot refuse a Consumer that
+ * holds a matching credential. In `single` mode the first rejection ends the
+ * request, so an earlier plugin that rejects a credential meant for a later
+ * one (two mechanisms reading the same header, for instance) refuses it:
+ * that depends on the request. A Consumer whose credential belongs to the
+ * first plugin in the chain is authenticated before any other runs, so
+ * `firstPluginMatches` clears it.
+ */
+function singleModeOrderReason(
+  proxy: Proxy,
+  authPlugins: EffectivePlugin[],
+  firstPluginMatches = false,
+): string | undefined {
+  if (isStreamProxy(proxy)) return streamAuthReason(authPlugins);
+  if (proxy.auth_mode === "multi" || authPlugins.length < 2 || firstPluginMatches) return undefined;
+  return (
+    `In single auth mode the first rejecting authentication plugin ends the request; ` +
+    `they run in the order ${authPlugins.map((plugin) => plugin.plugin_name).join(", ")}, ` +
+    "so a credential an earlier plugin rejects never reaches a later one"
+  );
+}
+
+/**
+ * Why a stream proxy's outcome for a Consumer is request-dependent, or
+ * `undefined` when it is not.
+ *
+ * A TCP/UDP/DTLS listener does not run the HTTP authentication phase, so
+ * `auth_mode` plays no part there. Ferrum Edge v0.9.21
+ * `run_tcp_stream_connect_plugins` (`src/proxy/tcp_proxy.rs`) runs every
+ * plugin's `on_stream_connect` in chain order and closes the connection at the
+ * first rejection; `mtls_auth`'s hook verifies the client certificate in
+ * every instance, even after an earlier one identified the Consumer. With
+ * more than one authentication plugin, each must accept the same
+ * certificate, which the stored credential cannot establish.
+ */
+function streamAuthReason(authPlugins: EffectivePlugin[]): string | undefined {
+  if (authPlugins.length < 2) return undefined;
+  return (
+    "On a stream proxy every authentication plugin's connection hook runs, in either auth mode, " +
+    `and the first rejection closes the connection (${authPlugins.map((plugin) => plugin.plugin_name).join(", ")}); ` +
+    "whether each accepts this Consumer's certificate depends on the connection"
+  );
+}
+
 export function resolveConsumerAccess(
   proxy: Proxy,
   effectivePlugins: EffectivePlugin[],
   consumer: Consumer,
 ): ConsumerAccessResult {
-  void proxy;
   const authPlugins = effectivePlugins.filter(isAuthPlugin);
   if (authPlugins.length === 0) {
     return { consumer, ...unidentifiedAccess(effectivePlugins) };
@@ -409,8 +490,11 @@ export function resolveConsumerAccess(
     UNOBSERVABLE_LOCAL_AUTH.has(plugin.plugin_name),
   );
   const triggered = authPlugins.filter((plugin) => plugin.trigger != null);
-  const priorityIndeterminate = authPlugins.length > 1 && authPlugins.some(
-    (plugin) => plugin.priority_override == null,
+  const first = authPlugins[0];
+  const orderDependent = singleModeOrderReason(
+    proxy,
+    authPlugins,
+    first !== undefined && first.trigger == null && matchingLocal.includes(first),
   );
 
   if (matchingLocal.length === 0 && external.length === 0 && !unknownLocal) {
@@ -421,7 +505,7 @@ export function resolveConsumerAccess(
     };
   }
 
-  if (unknownLocal || external.length > 0 || triggered.length > 0 || acl.conditional || priorityIndeterminate) {
+  if (unknownLocal || external.length > 0 || triggered.length > 0 || acl.conditional || orderDependent) {
     const reasons = [...acl.reasons];
     if (unknownLocal) reasons.push(BASIC_AUTH_UNKNOWN_REASON);
     if (external.length > 0) {
@@ -432,9 +516,7 @@ export function resolveConsumerAccess(
     if (triggered.length > 0) {
       reasons.push("One or more authentication plugins have request-dependent triggers");
     }
-    if (priorityIndeterminate) {
-      reasons.push("Authentication execution order is not exposed for every plugin instance");
-    }
+    if (orderDependent) reasons.push(orderDependent);
     if (matchingLocal.length > 0) {
       reasons.push(
         `Consumer has a matching local credential (${matchingLocal.map((p) => p.plugin_name).join(", ")})`,
@@ -480,9 +562,8 @@ export function analyzeProxyPolicy(
   if (authPlugins.some((plugin) => EXTERNAL_AUTH_PLUGINS.has(plugin.plugin_name))) {
     reasons.push("External identities cannot be mapped conclusively from stored consumers");
   }
-  if (authPlugins.length > 1 && authPlugins.some((plugin) => plugin.priority_override == null)) {
-    reasons.push("Authentication execution order is not fully exposed by the admin API");
-  }
+  const orderDependent = singleModeOrderReason(proxy, authPlugins);
+  if (orderDependent) reasons.push(orderDependent);
 
   const latestConfigUpdate = effectivePlugins
     .map((plugin) => plugin.updated_at)
