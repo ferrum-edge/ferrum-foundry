@@ -616,10 +616,10 @@ engine rows are new for 1.0.0 and gate it (`QUALIFICATION_JOBS` in
 The machine-readable `tested` record gains them in the 1.0.0 release PR.
 "Every page read through the BFF" is `server/routes/page-reads.gateway.test.ts`.
 Each list, proxy-detail filtered read (`/plugins/config?proxy_id=…`, verifying
-matching proxy-bound rows where seeded and an empty page for an absent proxy;
-and `/api-specs?offset=0&limit=2&proxy_id=…`, verifying the empty-state
-pagination contract on these mode fixtures, while populated API-spec bindings
-are qualified by the Pinned Gateway Contract), and summary read a Foundry page
+the seeded proxy-bound plugin in database mode and an empty page for an absent
+proxy; and `/api-specs?offset=0&limit=2&proxy_id=…`, verifying the empty-state
+pagination contract on database-backed mode fixtures and the recorded `503`
+where the fixture lacks a database), and summary read a Foundry page
 sends, as an unrestricted and as a namespace-scoped administrator, must answer
 `200` with the fields the page consumes (the list envelope, the metrics gateway
 block, the cluster `connected_mesh_nodes`, `data_planes` and `mesh_nodes`

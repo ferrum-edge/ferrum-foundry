@@ -410,11 +410,13 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
         // Proxy-detail filtered reads (`GET /plugins/config?proxy_id=…` and,
         // on database-backed modes, `GET /api-specs?offset=0&limit=2&proxy_id=…`).
         const listedPlugins = (listed.get('/plugins/config') ?? []) as { id?: unknown; proxy_id?: unknown }[];
-        const proxyBoundPlugin = listedPlugins.find(
-          (row): row is { id: string; proxy_id: string } =>
-            typeof row.id === 'string' && typeof row.proxy_id === 'string' && row.proxy_id.length > 0,
-        );
-        const filterProxyId = proxyBoundPlugin?.proxy_id ?? fixtureProxy ?? proxies
+        const expectedProxyBoundPlugin = target.mode === 'database'
+          ? { id: 'demo-proxy-catalog-key-auth', proxy_id: 'demo-proxy-catalog' }
+          : listedPlugins.find(
+              (row): row is { id: string; proxy_id: string } =>
+                typeof row.id === 'string' && typeof row.proxy_id === 'string' && row.proxy_id.length > 0,
+            );
+        const filterProxyId = expectedProxyBoundPlugin?.proxy_id ?? fixtureProxy ?? proxies
           .map((proxy) => proxy.id)
           .find((id): id is string => typeof id === 'string' && isAddressableResourceId(id));
         const absentProxyId = 'modes-no-such-proxy-filter';
@@ -455,11 +457,11 @@ it.runIf(process.env.FERRUM_PAGE_READS_GATEWAY_CONTRACT === 'true')(
             if (!filteredPluginsHitBody.data.every((row) => row.proxy_id === filterProxyId)) {
               wrong = `returned rows not bound to proxy_id=${filterProxyId}`;
             } else if (
-              proxyBoundPlugin &&
-              proxyBoundPlugin.proxy_id === filterProxyId &&
-              !filteredPluginsHitBody.data.some((row) => row.id === proxyBoundPlugin.id)
+              expectedProxyBoundPlugin &&
+              expectedProxyBoundPlugin.proxy_id === filterProxyId &&
+              !filteredPluginsHitBody.data.some((row) => row.id === expectedProxyBoundPlugin.id)
             ) {
-              wrong = `missing expected proxy-bound plugin ${proxyBoundPlugin.id}`;
+              wrong = `missing expected proxy-bound plugin ${expectedProxyBoundPlugin.id}`;
             }
           }
           if (wrong) {
