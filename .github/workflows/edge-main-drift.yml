@@ -7,8 +7,9 @@ name: Edge Main Drift
 # this workflow runs the same checks against the newest Edge `main` image:
 #
 #   * the guided plugin schema, plugin sensitivity and server-owned subset
-#     traffic_policy field comparisons, read at the image's Edge commit
-#     (scripts/edge-main-drift.mjs);
+#     traffic_policy field comparisons, and the plugin chain order, namespace
+#     route and metrics mode tables, read at the image's Edge commit
+#     (scripts/edge-main-drift.mjs, scripts/edge-source-parity.mjs);
 #   * the gateway contract steps of the Pinned Gateway Contract job, copied
 #     verbatim (scripts/edge-main-drift.test.mjs keeps the copies equal), with
 #     FERRUM_EDGE_IMAGE set to the Edge `main` image.
@@ -26,6 +27,7 @@ on:
     paths:
       - .github/workflows/edge-main-drift.yml
       - scripts/edge-main-drift.mjs
+      - scripts/edge-source-parity.mjs
 
 permissions:
   contents: read
@@ -167,7 +169,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Checking Ferrum Edge main at $commit ($image), $behind commit(s) behind main $main_head."
 
-      - name: Compare the plugin schemas, sensitivity table and server-owned subset fields with Edge main
+      - name: Compare the plugin schemas, sensitivity table, server-owned subset fields and Edge source tables with Edge main
         id: static
         env:
           EDGE_COMMIT: ${{ steps.edge.outputs.commit }}
@@ -204,6 +206,7 @@ jobs:
           docker run --detach --name ferrum-edge-contract \
             --publish 127.0.0.1:9000:9000 \
             --publish 127.0.0.1:8000:8000 \
+            --publish 127.0.0.1:18901:18901 \
             --add-host host.docker.internal:host-gateway \
             --env FERRUM_MODE=database \
             --env FERRUM_NAMESPACE=ferrum-foundry-demo \
@@ -324,6 +327,25 @@ jobs:
           FERRUM_CAPABILITY_EXPECT: read-only
         run: node scripts/capability-parity-contract.mjs
 
+      - name: Verify effective policy against the gateway
+        # Foundry's effective policy against the data plane: for a fixture of
+        # global, proxy-scoped and proxy-group key_auth and access_control
+        # plugins, every Consumer analyzeProxyPolicy admits must reach the
+        # backend and every one it refuses must get 401 or 403. The fixture
+        # is removed afterwards.
+        id: effective-policy
+        if: steps.ready.outcome == 'success'
+        continue-on-error: true
+        env:
+          FERRUM_EFFECTIVE_POLICY_GATEWAY_CONTRACT: 'true'
+          FERRUM_ADMIN_URL: http://127.0.0.1:9000
+          FERRUM_JWT_SECRET: contract-admin-signing-secret-at-least-32-characters
+          FERRUM_JWT_AUDIENCE: ferrum-admin
+          FERRUM_NAMESPACE: ferrum-foundry-demo
+          FERRUM_DEMO_BACKEND_HOST: host.docker.internal
+          FERRUM_DEMO_PROXY_URL: http://127.0.0.1:8000
+        run: npm exec -- vitest run --project frontend src/api/effectivePolicy.gateway.test.ts
+
       - name: Verify the editors' save payloads against the gateway
         # Foundry's own builders, not fixture spreads: the editors' unchanged
         # proxy and upstream saves, as they reach the gateway, over the seeded
@@ -340,7 +362,7 @@ jobs:
         run: npm exec -- vitest run --project frontend src/api/editorSave.gateway.test.ts
 
       - name: Show gateway logs on failure
-        if: failure() || steps.ready.outcome == 'failure' || steps.manifest.outcome == 'failure' || steps.diagnostics.outcome == 'failure' || steps.seed.outcome == 'failure' || steps.scale.outcome == 'failure' || steps.parity.outcome == 'failure' || steps.editor-save.outcome == 'failure'
+        if: failure() || steps.ready.outcome == 'failure' || steps.manifest.outcome == 'failure' || steps.diagnostics.outcome == 'failure' || steps.seed.outcome == 'failure' || steps.scale.outcome == 'failure' || steps.parity.outcome == 'failure' || steps.effective-policy.outcome == 'failure' || steps.editor-save.outcome == 'failure'
         run: |
           docker logs ferrum-edge-contract
           docker logs ferrum-edge-read-only
@@ -369,6 +391,7 @@ jobs:
           SEED: ${{ steps.seed.outcome }}
           SCALE: ${{ steps.scale.outcome }}
           PARITY: ${{ steps.parity.outcome }}
+          EFFECTIVE_POLICY: ${{ steps.effective-policy.outcome }}
           EDITOR_SAVE: ${{ steps.editor-save.outcome }}
           SETUP: >-
             checkout=${{ steps.checkout.outcome }}
@@ -395,7 +418,7 @@ jobs:
             [ "${entry#*=}" = success ] || failed_setup="$failed_setup ${entry%%=*}"
           done
           outcome=clean
-          for result in "$STATIC" "$READY" "$MANIFEST" "$DIAGNOSTICS" "$SEED" "$SCALE" "$PARITY" "$EDITOR_SAVE"; do
+          for result in "$STATIC" "$READY" "$MANIFEST" "$DIAGNOSTICS" "$SEED" "$SCALE" "$PARITY" "$EFFECTIVE_POLICY" "$EDITOR_SAVE"; do
             case "$result" in
               pass | success) ;;
               *) outcome=drift ;;
@@ -422,13 +445,14 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "|---|---|"
-            echo "| Guided plugin schemas, plugin sensitivity table and server-owned subset fields at the Edge commit | $(verdict "$STATIC") |"
+            echo "| Guided plugin schemas, plugin sensitivity table, server-owned subset fields, plugin chain order, namespace route table and metrics modes at the Edge commit | $(verdict "$STATIC") |"
             echo "| Gateway starts with Foundry's contract environment | $(verdict "$READY") |"
             echo "| Alloy preview and explicit HTTP resource mapping | $(verdict "$MANIFEST") |"
             echo "| Diagnostic reference lookup through the BFF | $(verdict "$DIAGNOSTICS") |"
             echo "| Seed twice and verify canonical backup state (\`npm run test:gateway-contract\`) | $(verdict "$SEED") |"
             echo "| 1,000-record collections read back through the BFF | $(verdict "$SCALE") |"
             echo "| Role and read-only capability parity | $(verdict "$PARITY") |"
+            echo "| Effective policy against the data plane | $(verdict "$EFFECTIVE_POLICY") |"
             echo "| Unchanged proxy and upstream editor saves (\`mergeFormUpdatePayload\`) | $(verdict "$EDITOR_SAVE") |"
             echo
             echo "Static findings:"

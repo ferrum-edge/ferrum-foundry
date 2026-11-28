@@ -22,6 +22,10 @@
  * comparison has no pinned counterpart; Foundry redacts the client-field
  * operands on every gateway.
  *
+ * It also runs the Edge source parity comparisons (`edge-source-parity.mjs`):
+ * the default plugin priorities, the namespace-scoped route kinds and
+ * `ns`-claim allowlists, and the metrics placeholder modes.
+ *
  * Only the content comparisons apply here. The pinned checks also fail when
  * the recorded ref (`PLUGIN_SCHEMA_SPEC.ref`, `PLUGIN_SENSITIVITY_SOURCE.commit`,
  * `SUBSET_TRAFFIC_POLICY_SOURCE.commit`) is not the checked commit; against
@@ -60,6 +64,11 @@ import {
   parseStringSliceConstant,
 } from "./plugin-sensitivity-drift.mjs";
 import { fetchPinnedSource } from "./pinned-source.mjs";
+import {
+  EDGE_SOURCE_TRANSCRIPTIONS,
+  edgeSourceParity,
+  parityMarkdown,
+} from "./edge-source-parity.mjs";
 import {
   compareServerOwned,
   parseServerOwnedSubsetFields,
@@ -160,19 +169,23 @@ export function edgeMainDrift(
 }
 
 /** The findings as a Markdown list, or a single line saying there are none. */
-export function driftMarkdown({ schemas, sensitivity, subset, trigger }) {
+export function driftMarkdown({ schemas, sensitivity, subset, trigger, sources }) {
+  const sourceLines = sources ? parityMarkdown(sources) : [];
   if (
     schemas.length === 0 &&
     sensitivity.length === 0 &&
     subset.length === 0 &&
-    trigger.length === 0
+    trigger.length === 0 &&
+    sourceLines.length === 0
   ) {
     return (
       "- Guided plugin schemas, the plugin sensitivity table, the server-owned " +
-      "subset traffic_policy fields and the plugin trigger predicate lists match.\n"
+      "subset traffic_policy fields, the plugin trigger predicate lists" +
+      (sources ? ", the plugin chain order, the namespace route table and the metrics modes" : "") +
+      " match.\n"
     );
   }
-  const lines = [];
+  const lines = [...sourceLines];
   for (const finding of schemas) {
     lines.push(
       `- \`${PLUGIN_SCHEMA_SPEC.path}\` component \`${finding.component}\`: ${finding.status}` +
@@ -206,16 +219,23 @@ export function driftMarkdown({ schemas, sensitivity, subset, trigger }) {
   return `${lines.join("\n")}\n`;
 }
 
-/** Fetch both Edge sources at `ref` and compare them. */
+/** Fetch every Edge source at `ref` and compare them. */
 export async function edgeMainDriftAt(ref, { fetchSource = fetchPinnedSource } = {}) {
   if (!COMMIT_PATTERN.test(ref ?? "")) {
     throw new Error(`expected a 40-hex Edge commit, got ${JSON.stringify(ref)}`);
   }
-  const [spec, projection] = await Promise.all([
+  const [spec, projection, parity, admin, metrics] = await Promise.all([
     fetchSource(PLUGIN_SCHEMA_SPEC, ref),
     fetchSource(PLUGIN_SENSITIVITY_SOURCE, ref),
+    ...EDGE_SOURCE_TRANSCRIPTIONS.map(({ source }) => fetchSource(source, ref)),
   ]);
-  return edgeMainDrift(spec, projection);
+  const result = edgeMainDrift(spec, projection);
+  const sources = edgeSourceParity({ parity, admin, metrics });
+  return {
+    ...result,
+    sources,
+    drifted: result.drifted || Object.values(sources).some((findings) => findings.length > 0),
+  };
 }
 
 if (
@@ -230,8 +250,8 @@ if (
     console.error(`The Edge main static checks could not run: ${error?.message ?? error}`);
     process.exit(2);
   }
-  const { schemas, sensitivity, subset, trigger, drifted } = result;
-  console.log(JSON.stringify({ ref, schemas, sensitivity, subset, trigger }, null, 2));
+  const { schemas, sensitivity, subset, trigger, sources, drifted } = result;
+  console.log(JSON.stringify({ ref, schemas, sensitivity, subset, trigger, sources }, null, 2));
   const detailsPath = process.env.FERRUM_EDGE_MAIN_DETAILS_PATH;
   if (detailsPath) writeFileSync(detailsPath, driftMarkdown(result));
   if (drifted) {
