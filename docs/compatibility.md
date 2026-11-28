@@ -876,9 +876,17 @@ adopts each one in the pin pull request, at these call sites:
   switching from its one-page hook to the whole-collection one (`useProxies` /
   `useAllProxies` in `src/hooks/useProxies.ts`, and the same pairs in
   `useUpstreams.ts`, `useConsumers.ts`, `usePlugins.ts` and `useApiSpecs.ts`).
-  Send the search as `q=` on the one-page read (`list` in `src/api/proxies.ts`,
-  `upstreams.ts`, `consumers.ts` and `apiSpecs.ts`, `listConfigs` in
-  `plugins.ts`) and keep paging server-side.
+  For the future Edge 1.0 re-pin (Edge PR #7546 `b020a5f`, proposed and not
+  yet released), `q=` applies only to proxies, consumers, upstreams and plugin
+  configs (`list` in `src/api/proxies.ts`, `consumers.ts` and `upstreams.ts`,
+  `listConfigs` in `plugins.ts`), keeping paging server-side. Keep API specs
+  (`src/api/apiSpecs.ts`, `src/routes/api-specs/index.tsx`) on the existing
+  title / spec ID / proxy ID / tag matcher and separate `items`/`next_offset`
+  traversal until a parity filter ships (`title_contains` alone does not
+  preserve it). Preserve proxy `backend_host` and plugin `proxy_id` lookups
+  where server `q=` support differs, or require a deliberate, documented and
+  tested intentional change before switching to server `q=`. Account for and
+  test whitespace and ASCII-vs-Unicode differences against client filtering.
 - **`applies_to_proxy=`.** Effective policy needs every global, proxy-scoped
   and proxy-group configuration that can reach one proxy, so it reads the whole
   plugin collection (`useAllPluginConfigs` → `plugins.listAllConfigs` in
@@ -893,9 +901,16 @@ adopts each one in the pin pull request, at these call sites:
   stays on the bounded collection read.
 - **A collection revision in `pagination`.** `collectBoundedPages` in
   `src/api/pagination.ts` assembles a complete collection from pages read at
-  different moments. Compare the revision of every page with the first and
-  restart (or report unknown) when it changes, so a traversal is one snapshot;
-  `collectAllPages` and every `listAll` inherit it.
+  different moments. In the proposed Edge PR #7546 (`b020a5f`, not yet
+  released), collection revision support applies only to proxies, consumers,
+  upstreams and plugin configs (`collectAllPages` and their `listAll` callers
+  inherit it; API specs keep their separate `items`/`next_offset` traversal).
+  Scope stable non-empty revision checks and `if_revision` to those supported
+  endpoints: send the first page's revision on subsequent pages and verify each
+  page matches it to detect revision changes, doing a bounded restart or
+  showing unknown on revision conflict. Standalone MongoDB writes the resource
+  and change record separately, so a page can briefly reflect a write before
+  its revision changes (replica sets support the strict revision guarantee).
 - **`ids=`.** Rows on screen resolve their references one request per id:
   `useUpstreamReferences` → `upstreams.getReference`
   (`src/hooks/useUpstreams.ts`, `src/api/upstreams.ts`) and
